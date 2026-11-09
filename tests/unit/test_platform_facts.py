@@ -112,3 +112,91 @@ def test_non_ascii_identifier_message_is_not_utf8(tmp_path: Path) -> None:
     assert errs
     with pytest.raises(UnicodeDecodeError):
         errs[0].message()
+
+
+def span(node: Any) -> tuple[tuple[int, int], tuple[int, int]]:
+    loc = node.location()
+    return loc.start(), loc.end()
+
+
+def loc_pair(loc: Any) -> tuple[tuple[int, int], tuple[int, int]] | None:
+    return None if loc is None else (loc.start(), loc.end())
+
+
+def test_paren_location_is_innermost_pair_only() -> None:
+    with parse_text("var x = ((a));\n", "p.chpl") as res:
+        [ident] = nodes(res.asts, chapel.Identifier)
+        assert loc_pair(ident.paren_location()) == ((1, 10), (1, 13))
+        assert span(ident) == ((1, 11), (1, 12))
+
+
+def test_statement_span_quirks() -> None:
+    text = "proc f() { return 1; }\nvar x = 1;\nf();\n"
+    with parse_text(text, "s.chpl") as res:
+        [fn] = nodes(res.asts, chapel.Function)
+        [ret] = nodes(res.asts, chapel.Return)
+        [var] = nodes(res.asts, chapel.Variable)
+        [call] = nodes(res.asts, chapel.FnCall)
+        assert span(ret) == ((1, 12), (1, 21))  # includes ';'
+        assert span(var) == ((2, 1), (2, 10))  # doesn't
+        assert span(call) == ((3, 1), (3, 4))  # doesn't
+        body = fn.body()
+        assert body is not None
+        assert span(body) == span(fn) == ((1, 1), (1, 23))
+        assert body.curly_braces_location() is None
+        assert loc_pair(fn.curly_braces_location()) == ((1, 10), (1, 23))
+
+
+def test_identifier_location_covers_type_constructor_call() -> None:
+    text = "class C {}\nvar a: owned C?;\nvar d: domain(2);\n"
+    with parse_text(text, "w.chpl") as res:
+        owned, domain = (
+            n for n in nodes(res.asts, chapel.Identifier) if n.name() != "C"
+        )
+        assert span(owned) == ((2, 8), (2, 16))
+        assert span(domain) == ((3, 8), (3, 17))
+
+
+def test_sub_locations_exist() -> None:
+    text = (
+        "proc f() throws { }\n"
+        "for i in 1..3 { }\n"
+        "if c then f(); else { f(); }\n"
+        "var y = r.fld;\n"
+    )
+    with parse_text(text, "l.chpl") as res:
+        [fn] = nodes(res.asts, chapel.Function)
+        [loop] = nodes(res.asts, chapel.For)
+        [cond] = nodes(res.asts, chapel.Conditional)
+        [dot] = nodes(res.asts, chapel.Dot)
+        assert loc_pair(fn.name_location()) == ((1, 6), (1, 7))
+        assert loc_pair(fn.header_location()) == ((1, 1), (1, 16))
+        assert loc_pair(fn.throws_location()) == ((1, 10), (1, 16))
+        assert loc_pair(loop.header_location()) == ((2, 1), (2, 14))
+        assert loc_pair(loop.curly_braces_location()) == ((2, 15), (2, 18))
+        assert loc_pair(cond.then_keyword_location()) == ((3, 6), (3, 10))
+        assert loc_pair(cond.else_keyword_location()) == ((3, 16), (3, 20))
+        assert loc_pair(dot.field_location()) == ((4, 11), (4, 14))
+
+
+def test_block_style_values() -> None:
+    text = (
+        "for i in 1..3 do f(); for i in 1..3 { f(); }\n"
+        "if c then f(); else { f(); }\nif c { }\n"
+        "begin f(); begin { f(); }\n"
+        "select x { when 1 do f(); when 2 { } }\n"
+    )
+    with parse_text(text, "b.chpl") as res:
+        loops = nodes(res.asts, chapel.For)
+        assert [n.block_style() for n in loops] == ["implicit", "explicit"]
+        conds = nodes(res.asts, chapel.Conditional)
+        assert [(n.then_block_style(), n.else_block_style()) for n in conds] == [
+            ("implicit", "explicit"),
+            ("explicit", "implicit"),  # no `else` reports "implicit"
+        ]
+        begins = nodes(res.asts, chapel.Begin)
+        assert [n.block_style() for n in begins] == ["implicit", "explicit"]
+        whens = nodes(res.asts, chapel.When)
+        assert [n.block_style() for n in whens] == ["implicit", "explicit"]
+        # Body Blocks always say "explicit", even after `do`.
+        assert {b.block_style() for b in nodes(res.asts, chapel.Block)} == {"explicit"}

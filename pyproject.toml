@@ -48,6 +48,7 @@ ignore = ["E501"]
 [tool.pyright]
 include = ["src", "tests"]
 strict = ["src"]
+extraPaths = ["src", "tests"]
 pythonVersion = "3.12"
 venvPath = "."
 venv = ".venv"
@@ -55,3 +56,4 @@ venv = ".venv"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra"]
+markers = ["corpus: property tests over the Chapel corpus (slow)"]
