@@ -11,6 +11,7 @@ from chplfmt.config import FormatOptions
 from chplfmt.doc.ir import (
     Align,
     Check,
+    ColumnText,
     Concat,
     ConditionalGroup,
     Doc,
@@ -22,10 +23,13 @@ from chplfmt.doc.ir import (
     Indent,
     Line,
     LineSuffix,
+    SuffixBreak,
     Text,
     TrailingComment,
     Verbatim,
     concat,
+    hardline,
+    literalline,
 )
 from chplfmt.source import display_width
 
@@ -231,6 +235,13 @@ class _Printer:
                     c = self.comment
                     self.comment = d.text if c is None else f"{c} {d.text}"
             elif isinstance(d, Verbatim):
+                if d.bol:
+                    if not measure and (self.suffixes or "".join(buf).strip(" ")):
+                        cmds += [(ind, mode, d), (ind, mode, literalline)]
+                        continue
+                    buf.clear()
+                    self.protect = 0
+                    self.pos = 0
                 for i, seg in enumerate(d.s.split("\n")):
                     if i:
                         self.finish()
@@ -242,6 +253,16 @@ class _Printer:
                         self.protect = len(buf)
                     self.pos = display_width(seg, self.pos, tab)
                     self.line_verbatim = True
+            elif isinstance(d, ColumnText):
+                for i, seg in enumerate(d.make(self.pos).split("\n")):
+                    if i:
+                        self.finish()
+                        self.pos = 0
+                    if not measure:
+                        buf.append(seg)
+                    self.pos = display_width(seg, self.pos, tab)
+            elif isinstance(d, SuffixBreak) and self.suffixes:
+                cmds.append((ind, mode, hardline))
             # BreakParent prints nothing.
 
     def _fill(self, f: Fill, i: int, ind: int, mode: bool, cmds: list[_Cmd]) -> None:
@@ -382,9 +403,12 @@ class _Printer:
                 stack.append((0, mode, d.broken if gm else d.flat))
             elif isinstance(d, Verbatim):
                 head, nl, _ = d.s.partition("\n")
-                col = display_width(head, col, tab)
+                col = display_width(head, 0 if d.bol else col, tab)
                 if nl:
                     return col
                 if col > limit:
                     return -1
-            # LineSuffix, TrailingComment, BreakParent: zero width.
+            elif isinstance(d, ColumnText):
+                head = d.make(col).partition("\n")[0]
+                return display_width(head, col, tab)
+            # LineSuffix, TrailingComment, BreakParent, SuffixBreak: zero width.

@@ -181,7 +181,7 @@ def format_text(
         if parsed.errors:
             raise ChplParseError(parsed.errors)
         index = TokenIndex.build(SourceText.from_text(text), parsed.asts)
-        result, report = _print_text(index, options)
+        result, report = _print_text(index, options, logical)
         if not debug.skip_verify:
             try:
                 verify(
@@ -200,8 +200,10 @@ def format_text(
     return FormatResult(result, result != text, edits, report=report)
 
 
-def _print_text(index: TokenIndex, options: FormatOptions) -> tuple[str, PrintReport]:
-    p = Printer(index, options)
+def _print_text(
+    index: TokenIndex, options: FormatOptions, path: str
+) -> tuple[str, PrintReport]:
+    p = Printer(index, options, path=path)
     return render(p.print_file(), options).text, p.report
 
 

@@ -252,6 +252,9 @@ def _process(
         _err(f"{inp.display}: internal error: {type(e).__name__}: {e}")
         return EXIT_INTERNAL
 
+    for w in result.report.warnings:
+        _err(f"{inp.display}:{w.line}:{w.col}: warning: {w.message}")
+
     if args.in_place:
         if result.changed and inp.path is not None:
             try:

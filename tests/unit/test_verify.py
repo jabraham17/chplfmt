@@ -340,7 +340,7 @@ def test_format_text_verifies_and_dumps(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(
-        api, "_print_text", lambda index, options: ("var y;\n", PrintReport())
+        api, "_print_text", lambda index, options, path: ("var y;\n", PrintReport())
     )
     with pytest.raises(VerificationError) as info:
         api.format_text("var x;\n", path="d/a.chpl")
@@ -371,7 +371,7 @@ def test_cli_debug_flags(
     monkeypatch.chdir(tmp_path)
     Path("a.chpl").write_text("var x;\n")
     monkeypatch.setattr(
-        api, "_print_text", lambda index, options: ("var y;\n", PrintReport())
+        api, "_print_text", lambda index, options, path: ("var y;\n", PrintReport())
     )
     assert main(["a.chpl", "--debug-dump-failed", "dump"]) == 4
     assert "failed verification (ast) at input 1:1 / output 1:1" in (

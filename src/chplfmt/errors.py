@@ -9,6 +9,10 @@ class FormatError(Exception):
     pass
 
 
+class InternalError(FormatError):
+    """A printer bug caught before verification (e.g. a lost comment)."""
+
+
 class ChplParseError(FormatError):
     def __init__(self, diagnostics: list[Diagnostic]) -> None:
         self.diagnostics = diagnostics

@@ -9,7 +9,8 @@ prints children with `p.print(child)` and nested statement lists with
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Generator, Iterator, Sequence
+from collections import Counter
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -19,6 +20,8 @@ from chplfmt.config import FormatOptions
 from chplfmt.doc import (
     EMPTY,
     Doc,
+    break_parent,
+    column_text,
     concat,
     hardline,
     literalline,
@@ -26,15 +29,18 @@ from chplfmt.doc import (
     trailing_comment,
     verbatim,
 )
+from chplfmt.errors import InternalError
 from chplfmt.lexer import TokenKind
 from chplfmt.offregions import (
     OffRegion,
     OffRegions,
+    directive,
     find_off_regions,
     is_statement_list,
 )
 from chplfmt.source import display_width
 from chplfmt.tokens import Node, Span, TokenIndex
+from chplfmt.trivia import Attachment, Comment, Key, Placement, attach
 
 log = logging.getLogger("chplfmt.printer")
 
@@ -62,11 +68,21 @@ class RuleApplication:
     input_line: int
 
 
+@dataclass(frozen=True)
+class PrintWarning:
+    """A user-facing warning at 1-based `line`:`col` (byte column)."""
+
+    line: int
+    col: int
+    message: str
+
+
 @dataclass
 class PrintReport:
     applications: list[RuleApplication] = field(default_factory=list[RuleApplication])
     # Nodes printed by the fallback, as `"Tag@line:col"` (coverage gate).
     fallbacks: list[str] = field(default_factory=list[str])
+    warnings: list[PrintWarning] = field(default_factory=list[PrintWarning])
 
     def rule_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -75,15 +91,15 @@ class PrintReport:
         return counts
 
 
-@dataclass(frozen=True)
+@dataclass
 class _Element:
-    """One item of a statement list: a node, a loose token run, a comment, or an off region."""
+    """One item of a statement list: a node, a loose token run, or an off region."""
 
     first: int  # token span
     last: int
     node: Node | None = None
-    comment: bool = False
     region: OffRegion | None = None
+    swallowed: list[Node] = field(default_factory=list[Node])  # nodes in `region`
 
 
 class Printer:
@@ -96,15 +112,22 @@ class Printer:
         *,
         off: OffRegions | None = None,
         registry: dict[type, PrintFn] | None = None,
+        path: str = "<stdin>",
     ) -> None:
         self.index = index
         self.source = index.source
         self.tokens = index.tokens
         self.options = options
+        self.path = path
         self.off = find_off_regions(index) if off is None else off
         self._region_at = {r.off_token: r for r in self.off.regions}
         self.registry = REGISTRY if registry is None else registry
         self.report = PrintReport()
+        self.trivia: Attachment = attach(index, self.off)
+        # Comment tokens put into the Doc, for the exactly-once check.
+        self.emitted: list[int] = []
+        for i in self.off.misplaced:
+            self._warn_directive(i)
         # Absolute output column of the current statement indentation. Keep it
         # in sync with `indent(...)` via `nested()`; the fallback relies on it.
         self.indent = 0
@@ -139,20 +162,34 @@ class Printer:
 
     # The print wrapper
 
-    def print(self, node: Node, *, col: int | None = None) -> Doc:
-        """Print `node` (section 7.7); `col` is its output start column if known."""
+    def print(
+        self,
+        node: Node,
+        *,
+        col: int | None = None,
+        leading: bool = True,
+        trailing: bool = True,
+    ) -> Doc:
+        """Print `node` (section 7.7); `col` is its output start column if known.
+
+        Leading and trailing comments are included unless the caller prints
+        them itself (`leading=False` + `leading_comments(node)`, e.g. comments
+        before `else`). Print each node once and reuse the Doc in alternatives.
+        """
+        lead = self.leading_comments(node) if leading else EMPTY
         sp = self.span(node)
         if sp is not None and self.off.contains(self.tokens[sp[0]].start_offset):
             self.end_col = None
-            return verbatim(self._original(sp))
-        fn = self.lookup(type(node))
-        if fn is None:
-            d = self.fallback(node, col=col)
+            d: Doc = verbatim(self._original(sp))
         else:
-            d = fn(self, node)
-            self.end_col = None
-        d = self.wrap_user_parens(node, d)
-        return concat(self.leading_comments(node), d, self.trailing_comments(node))
+            fn = self.lookup(type(node))
+            if fn is None:
+                d = self.fallback(node, col=col)
+            else:
+                d = fn(self, node)
+                self.end_col = None
+            d = self.wrap_user_parens(node, d)
+        return concat(lead, d, self.trailing_comments(node) if trailing else EMPTY)
 
     def wrap_user_parens(self, node: Node, d: Doc) -> Doc:
         """Re-add the user's parentheses around `node` (remove-redundant-parens hook)."""
@@ -167,13 +204,108 @@ class Printer:
         """Whether one layer of user parentheses stays (M6: the rule decides)."""
         return True
 
-    def leading_comments(self, node: Node) -> Doc:
-        """Comments attached before `node` (M4 trivia); none yet."""
-        return EMPTY
+    # Comments (section 7.5). Each helper marks what it returns as emitted.
 
-    def trailing_comments(self, node: Node) -> Doc:
-        """Comments attached after `node` (M4 trivia); none yet."""
-        return EMPTY
+    def comment_doc(self, i: int) -> Doc:
+        """Comment token `i`; a multi-line block comment re-indents by its column."""
+        self.emitted.append(i)
+        if "\n" in self.tokens[i].text:
+            return column_text(lambda col: self.comment_text(i, col))
+        return text(self.comment_text(i, 0))
+
+    def _breaks(self, nl: int) -> list[Doc]:
+        blank = min(max(nl - 1, 0), self.options.max_blank_lines)
+        return [hardline] * (blank + 1)
+
+    def leading_comments(self, node: Key) -> Doc:
+        """Comments before `node`, each followed by a space or line break(s).
+
+        An end-of-line `//` comment (e.g. after an open bracket) becomes a
+        trailing comment of the current line.
+        """
+        parts: list[Doc] = []
+        for c in self.trivia.leading(node):
+            if c.is_line and c.placement is Placement.END_OF_LINE:
+                self.emitted.append(c.token)
+                parts.append(trailing_comment(self.comment_text(c.token, 0)))
+            else:
+                parts.append(self.comment_doc(c.token))
+            parts += (
+                self._breaks(c.nl_after) if c.nl_after or c.is_line else [text(" ")]
+            )
+        return concat(*parts)
+
+    def trailing_comments(self, node: Key) -> Doc:
+        """Comments after `node`.
+
+        Own-line ones go on their own lines (blank lines collapsed); `//`
+        end-of-line ones become trailing comments (`break_parent`); others
+        follow after one space. After an own-line `//` comment a line break
+        follows, except for statement-list items (the list adds it).
+        """
+        cs = self.trivia.trailing(node)
+        parts = [self._comment_after(c) for c in cs]
+        if (
+            cs
+            and cs[-1].is_line
+            and cs[-1].placement is Placement.OWN_LINE
+            and node is not None
+            and not is_statement_list(self.index.parent(node))
+        ):
+            parts.append(hardline)
+        return concat(*parts)
+
+    def _comment_after(self, c: Comment) -> Doc:
+        if c.placement is Placement.OWN_LINE:
+            return concat(*self._breaks(c.nl_before), self.comment_doc(c.token))
+        if c.is_line:
+            self.emitted.append(c.token)
+            return concat(trailing_comment(self.comment_text(c.token, 0)), break_parent)
+        return concat(" ", self.comment_doc(c.token))
+
+    def dangling_comments(self, node: Key, *anchors: str) -> Doc:
+        """Not-yet-emitted dangling comments of `node` (all, or those after `anchors`).
+
+        Anchor kinds are `{`, `(`, `[`, `then`, `else`, `header`, or `""` for
+        comments with no anchor. Own-line comments start on a new line; others
+        follow after one space. The caller must break the line after the
+        result if it may end with a `//` comment (it ends with `break_parent`).
+        """
+        done = set(self.emitted)
+        parts: list[Doc] = []
+        for d in self.trivia.dangling(node):
+            kind = "" if d.anchor is None else d.anchor.kind
+            if d.comment.token in done or (anchors and kind not in anchors):
+                continue
+            parts.append(self._comment_after(d.comment))
+        return concat(*parts)
+
+    def check_comments(self) -> None:
+        """Raise `InternalError` unless every attached comment was emitted once."""
+        counts = Counter(self.emitted)
+        for i in self.trivia.comments:
+            n = counts.pop(i, 0)
+            if n != 1:
+                self._comment_error(i, f"printed {n} times")
+        for i in counts:
+            self._comment_error(i, "printed but not attached")
+
+    def _comment_error(self, i: int, what: str) -> None:
+        line, col = self.tokens[i].start
+        raise InternalError(
+            f"{self.path}: internal error: comment at {line}:{col} {what}"
+        )
+
+    def _warn_directive(self, i: int) -> None:
+        line, col = self.tokens[i].start
+        why = (
+            "no matching `chplfmt: off`"
+            if directive(self.index, i) == "on"
+            else "not between statements"
+        )
+        message = f"chplfmt directive ignored ({why})"
+        log.warning("%s:%d:%d: %s", self.path, line, col, message)
+        self.report.warnings.append(PrintWarning(line, col, message))
 
     def _original(self, sp: Span) -> str:
         return self.source.text[
@@ -225,6 +357,7 @@ class Printer:
         parts: list[Doc] = []
         cur: list[str] = []
         line_start = start_col  # output column of cur[0]
+        known = True  # False after a multi-line comment (column set at render)
 
         def flush() -> None:
             if cur:
@@ -241,6 +374,7 @@ class Printer:
             if i > first:
                 if tok.nl_before:
                     flush()
+                    known = True
                     blank = min(tok.nl_before - 1, opts.max_blank_lines)
                     parts.extend([literalline] * (blank + 1))
                     r = regions.get(i)
@@ -266,24 +400,24 @@ class Printer:
                     cur.append(" " * max(gap, 1))
             kind = tok.kind
             if kind is TokenKind.LINE_COMMENT or kind is TokenKind.BLOCK_COMMENT:
-                out = self.comment_text(i, out_col())
-                first_line, *rest = out.split("\n")
-                cur.append(first_line)
-                for seg in rest:
+                if "\n" in tok.text:
                     flush()
-                    parts.append(literalline)
-                    cur.append(seg)
-                    line_start = 0
+                    parts.append(self.comment_doc(i))
+                    known = False
+                else:
+                    self.emitted.append(i)
+                    cur.append(self.comment_text(i, 0))
             elif "\n" in tok.text:  # multi-line string or extern block
                 flush()
                 parts.append(verbatim(tok.text))
                 last_seg = tok.text.rsplit("\n", 1)[1]
                 line_start = display_width(last_seg, 0, tab)
+                known = True
             else:
                 cur.append(tok.text)
             i += 1
         flush()
-        self.end_col = out_col()
+        self.end_col = out_col() if known else None
         return concat(*parts)
 
     def comment_text(self, i: int, output_col: int) -> str:
@@ -307,127 +441,132 @@ class Printer:
     # Statement lists
 
     def statement_list(self, stmts: Sequence[Node], first: int, end: int) -> Doc:
-        """Statements and the comments between them, starting at `self.indent`.
+        """Statements with their comments, starting at `self.indent`.
 
         `first..end-1` are the tokens inside the list (e.g. after `{`, before
         `}`). Statements go on their own lines; blank lines between items
-        collapse to `max-blank-lines`; none are kept before the first item.
-        Off regions are emitted byte-for-byte. Comments are emitted where they
-        are (own-line or after code on the same line) until M4 attaches them.
+        (counted from an item's first leading comment) collapse to
+        `max-blank-lines`; none are added before the first item. Off regions
+        are emitted byte-for-byte from the start of their line. The caller
+        must follow the result with a line break (the last item may end with
+        an own-line `//` comment) and prints dangling comments of the list's
+        owner (`dangling_comments`), e.g. an end-of-line comment after `{`.
         """
         parts: list[Doc] = []
-        col: int | None = self.indent
-        prev: _Element | None = None
+        started = False
         for el in self._elements(stmts, first, end):
+            node = el.node
+            if el.region is not None:
+                lead = [c for n in el.swallowed for c in self.trivia.leading(n)]
+                if started:
+                    parts += self._breaks(
+                        self.tokens[lead[0].token if lead else el.first].nl_before
+                    )
+                r = el.region
+                parts += [self.leading_comments(n) for n in el.swallowed]
+                parts.append(verbatim(self.source.text[r.start : r.end], bol=True))
+                parts += [self.trailing_comments(n) for n in el.swallowed]
+                started = True
+                continue
+            first_tok = el.first
+            if node is not None and (lead := self.trivia.leading(node)):
+                first_tok = lead[0].token
             if (
-                isinstance(el.node, chapel.EmptyStmt)
+                isinstance(node, chapel.EmptyStmt)
                 and self.options.remove_empty_statements
             ):
                 self.record("remove-empty-statements", el.first)
-                continue
-            tok = self.tokens[el.first]
-            same_line = prev is not None and tok.nl_before == 0
-            if el.region is not None:
-                if prev is not None:
-                    blank = min(max(tok.nl_before - 1, 0), self.options.max_blank_lines)
-                    parts.extend([literalline] * (blank + 1))
-                r = el.region
-                parts.append(verbatim(self.source.text[r.start : r.end]))
-                col = None
-                prev = el
-                continue
-            if same_line and (el.comment or (prev is not None and prev.comment)):
-                parts.append(text(" "))
-                col = None if col is None else col + 1
-            elif prev is not None:
-                blank = min(max(tok.nl_before - 1, 0), self.options.max_blank_lines)
-                parts.extend([hardline] * (blank + 1))
-                col = self.indent
-            if el.comment:
-                d, col = self._list_comment(el.first, col, same_line)
-                parts.append(d)
-            elif el.node is not None:
-                parts.append(self.print(el.node, col=col))
-                col = self.end_col
-            else:
-                parts.append(self.raw_tokens(el.first, el.last, col=col))
-                col = self.end_col
-            prev = el
-        return concat(*parts)
-
-    def _list_comment(
-        self, i: int, col: int | None, same_line: bool
-    ) -> tuple[Doc, int | None]:
-        tok = self.tokens[i]
-        if same_line and tok.kind is TokenKind.LINE_COMMENT:
-            return trailing_comment(self.comment_text(i, col or 0)), None
-        if col is None and "\n" in tok.text:
-            # Unknown column: move a multi-line block comment to its own line.
-            col = self.indent
-            out = self.comment_text(i, col)
-            lines = out.split("\n")
-            return concat(hardline, self._lines(lines)), None
-        out = self.comment_text(i, col or 0)
-        lines = out.split("\n")
-        tab = self.options.tab_size
-        if len(lines) == 1:
-            return text(out), (None if col is None else display_width(out, col, tab))
-        return self._lines(lines), display_width(lines[-1], 0, tab)
-
-    @staticmethod
-    def _lines(lines: list[str]) -> Doc:
-        parts: list[Doc] = [text(lines[0])]
-        for line in lines[1:]:
-            parts += [literalline, text(line)]
-        return concat(*parts)
-
-    def _elements(
-        self, stmts: Sequence[Node], first: int, end: int
-    ) -> Iterator[_Element]:
-        """List items in token order; off regions swallow the items they contain."""
-        tokens = self.tokens
-        regions = sorted(self.off.regions, key=lambda r: r.start)
-        ri = 0
-
-        def items() -> Iterator[_Element]:
-            i = first
-            for node in stmts:
-                sp = self.index.stmt_span(node)
-                if sp is None:
+                cs = self.trivia.leading(node) + self.trivia.trailing(node)
+                if not cs:
                     continue
-                yield from loose(i, sp[0])
-                yield _Element(sp[0], sp[1], node=node)
-                i = sp[1] + 1
-            yield from loose(i, end)
+                d = self._comment_lines(cs)
+            elif node is not None:
+                d = self.print(node, col=self.indent)
+            else:
+                d = self.raw_tokens(el.first, el.last, col=self.indent)
+            if started:
+                parts += self._breaks(self.tokens[first_tok].nl_before)
+            parts.append(d)
+            started = True
+        return concat(*parts)
 
-        def loose(i: int, stop: int) -> Iterator[_Element]:
+    def _comment_lines(self, cs: list[Comment]) -> Doc:
+        """Comments each on its own line (those of a dropped statement or file)."""
+        parts: list[Doc] = []
+        for k, c in enumerate(cs):
+            if k:
+                parts += self._breaks(c.nl_before)
+            parts.append(self.comment_doc(c.token))
+        return concat(*parts)
+
+    def _elements(self, stmts: Sequence[Node], first: int, end: int) -> list[_Element]:
+        """List items in token order; off regions swallow the items they contain.
+
+        Comments are not items: they are attached to nodes.
+        """
+        tokens = self.tokens
+        items: list[_Element] = []
+
+        def loose(i: int, stop: int) -> None:
             while i < stop:
                 if tokens[i].is_comment:
-                    yield _Element(i, i, comment=True)
                     i += 1
                     continue
                 j = i
                 while j + 1 < stop and not tokens[j + 1].is_comment:
                     j += 1
-                yield _Element(i, j)
+                items.append(_Element(i, j))
                 i = j + 1
 
-        current: OffRegion | None = None
-        for el in items():
-            offset = tokens[el.first].start_offset
-            while ri < len(regions) and regions[ri].end <= offset:
-                ri += 1
-            if ri < len(regions) and regions[ri].start <= offset:
-                if regions[ri] is not current:
-                    current = regions[ri]
-                    yield _Element(current.off_token, current.off_token, region=current)
+        i = first
+        for node in stmts:
+            sp = self.index.stmt_span(node)
+            if sp is None:
                 continue
-            yield el
+            loose(i, sp[0])
+            items.append(_Element(sp[0], sp[1], node=node))
+            i = sp[1] + 1
+        loose(i, end)
+
+        regions = sorted(
+            (
+                r
+                for r in self.off.regions
+                if first <= r.off_token < end
+                and not any(it.first <= r.off_token <= it.last for it in items)
+            ),
+            key=lambda r: r.off_token,
+        )
+        if not regions:
+            return items
+        out: list[_Element] = []
+        ri = 0
+        current: _Element | None = None
+        for it in items:
+            while ri < len(regions) and regions[ri].off_token < it.first:
+                r = regions[ri]
+                current = _Element(r.off_token, r.off_token, region=r)
+                out.append(current)
+                ri += 1
+            if (
+                current is not None
+                and (r := current.region) is not None
+                and r.start <= tokens[it.first].start_offset < r.end
+            ):
+                if it.node is not None:
+                    current.swallowed.append(it.node)
+                continue
+            out.append(it)
+        out += [_Element(r.off_token, r.off_token, region=r) for r in regions[ri:]]
+        return out
 
     # File level
 
     def print_file(self) -> Doc:
-        """The whole file: its top-level statement list and a final newline."""
+        """The whole file: its top-level statement list and a final newline.
+
+        Raises `InternalError` if a comment would be lost or duplicated.
+        """
         roots = self.index.roots
         stmts: list[Node] = []
         for root in roots:
@@ -438,4 +577,15 @@ class Printer:
         eof = len(self.tokens) - 1
         if eof == 0:
             return EMPTY
-        return concat(self.statement_list(stmts, 0, eof), hardline)
+        body = self.statement_list(stmts, 0, eof)
+        # Comments of a file without statements.
+        cs = [
+            d.comment
+            for key in {self.trivia.file_node, None}
+            for d in self.trivia.dangling(key)
+        ]
+        if cs:
+            cs.sort(key=lambda c: c.token)
+            body = concat(body, self._comment_lines(cs))
+        self.check_comments()
+        return concat(body, hardline)

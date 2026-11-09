@@ -12,6 +12,7 @@ from chplfmt.doc import (
     align,
     align_trailing_comments,
     break_parent,
+    column_text,
     concat,
     conditional_group,
     dump,
@@ -25,6 +26,7 @@ from chplfmt.doc import (
     literalline,
     render,
     softline,
+    suffix_break,
     text,
     trailing_comment,
     verbatim,
@@ -286,6 +288,37 @@ def test_verbatim_lines_are_not_aligned() -> None:
         trailing_comment("// a"),
     )
     assert r(doc) == "x;\t  // v\nlonger; // a"
+
+
+def test_verbatim_bol_starts_at_column_zero() -> None:
+    region = "  x  ;\n\ty;"
+    # Indentation already emitted is dropped.
+    doc = concat("{", indent(concat(hardline, verbatim(region, bol=True)), 2))
+    assert r(doc) == "{\n" + region
+    # Code before it on the line, or a pending suffix, gets a newline first.
+    assert r(concat("a;", verbatim(region, bol=True))) == "a;\n" + region
+    doc = concat("a;", trailing_comment("// c"), verbatim(region, bol=True))
+    assert r(doc) == "a; // c\n" + region
+    assert "verbatim bol" in dump(verbatim(region, bol=True))
+
+
+def test_column_text_gets_its_start_column() -> None:
+    def make(col: int) -> str:
+        return f"/* at {col}\n{' ' * col}*/"
+
+    doc = concat("ab", indent(concat(hardline, "x = ", column_text(make)), 2))
+    assert r(doc) == "ab\n  x = /* at 6\n      */"
+    # Forced: it breaks enclosing groups; fits measures its first line only.
+    assert r(group(concat("a", line, column_text(make)))) == "a\n/* at 0\n*/"
+    assert "column_text" in dump(column_text(make))
+
+
+def test_suffix_break_only_with_pending_suffix() -> None:
+    doc = group(concat("f(a,", line, suffix_break, "b)"))
+    assert r(doc) == "f(a, b)"
+    doc = group(concat("f(a,", trailing_comment("// c"), line, suffix_break, "b)"))
+    assert r(doc) == "f(a, // c\nb)"
+    assert dump(suffix_break) == "suffix_break"
 
 
 # fill

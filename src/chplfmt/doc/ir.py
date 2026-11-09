@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import ClassVar
 
@@ -153,6 +153,21 @@ class ConditionalGroup:
 @dataclass(frozen=True, slots=True, eq=False)
 class Verbatim:
     s: str
+    # Starts at column 0: replaces the indentation already on the line.
+    bol: bool = False
+    forced: ClassVar[bool] = False
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class ColumnText:
+    """Multi-line text computed at render time from its start column."""
+
+    make: Callable[[int], str]
+    forced: ClassVar[bool] = True
+
+
+@dataclass(frozen=True, slots=True, eq=False)
+class SuffixBreak:
     forced: ClassVar[bool] = False
 
 
@@ -170,6 +185,8 @@ type Doc = (
     | BreakParent
     | ConditionalGroup
     | Verbatim
+    | ColumnText
+    | SuffixBreak
 )
 type DocLike = Doc | str
 
@@ -250,9 +267,26 @@ def conditional_group(
     return ConditionalGroup(tuple(_doc(a) for a in alts), check)
 
 
-def verbatim(s: str) -> Verbatim:
-    """Text (possibly multi-line) emitted byte-for-byte."""
-    return Verbatim(s)
+def verbatim(s: str, bol: bool = False) -> Verbatim:
+    """Text (possibly multi-line) emitted byte-for-byte.
+
+    With `bol`, it starts a line: indentation already emitted on the current
+    line is dropped (code before it gets a newline).
+    """
+    return Verbatim(s, bol)
+
+
+def column_text(make: Callable[[int], str]) -> ColumnText:
+    """Text whose lines depend on its start column: `make(col)`.
+
+    Lines after the first start at column 0 (like `literalline`). Used for
+    multi-line block comments, re-indented by their output column.
+    """
+    return ColumnText(make)
+
+
+suffix_break = SuffixBreak()
+"""A newline (at the current indentation) only if a `line_suffix` is pending."""
 
 
 def dump(doc: DocLike) -> str:
@@ -271,8 +305,12 @@ def _dump(d: Doc, depth: int, out: list[str]) -> None:
     match d:
         case Text(s):
             out.append(f"{pad}text {s!r}")
-        case Verbatim(s):
-            out.append(f"{pad}verbatim {s!r}")
+        case Verbatim(s, bol):
+            out.append(f"{pad}verbatim{' bol' if bol else ''} {s!r}")
+        case ColumnText(make):
+            out.append(f"{pad}column_text {make(0)!r}")
+        case SuffixBreak():
+            out.append(f"{pad}suffix_break")
         case TrailingComment(s):
             out.append(f"{pad}trailing_comment {s!r}")
         case BreakParent():
