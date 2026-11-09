@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import difflib
+import os
 from dataclasses import dataclass
 
 from chplfmt._chapel import Diagnostic, parse_text
+from chplfmt.comments import expected_comment_text
 from chplfmt.config import FormatOptions, load_options
+from chplfmt.errors import ChplParseError, FormatError, VerificationError
+from chplfmt.offregions import verbatim_spans
+from chplfmt.source import SourceText, display_width
+from chplfmt.tokens import TokenIndex
+from chplfmt.verify import verify
 
 __all__ = [
     "ChplParseError",
+    "DebugOptions",
     "Diagnostic",
     "FormatError",
     "FormatOptions",
@@ -37,33 +45,12 @@ class FormatResult:
     edits: list[TextEdit]
 
 
-class FormatError(Exception):
-    pass
+@dataclass(frozen=True)
+class DebugOptions:
+    """Development-only switches (hidden CLI flags)."""
 
-
-class ChplParseError(FormatError):
-    def __init__(self, diagnostics: list[Diagnostic]) -> None:
-        self.diagnostics = diagnostics
-        super().__init__("\n".join(str(d) for d in diagnostics))
-
-
-class VerificationError(FormatError):
-    def __init__(
-        self,
-        path: str,
-        check: str,
-        input_pos: tuple[int, int],
-        output_pos: tuple[int, int],
-    ) -> None:
-        self.path = path
-        self.check = check
-        self.input_pos = input_pos
-        self.output_pos = output_pos
-        super().__init__(
-            f"{path}: internal error: formatter output failed verification "
-            f"({check}) at input {input_pos[0]}:{input_pos[1]} / "
-            f"output {output_pos[0]}:{output_pos[1]}"
-        )
+    dump_failed_dir: str | None = None  # save output that fails verification
+    skip_verify: bool = False
 
 
 def compute_edits(old: str, new: str) -> list[TextEdit]:
@@ -84,6 +71,7 @@ def format_text(
     path: str | None = None,
     options: FormatOptions = FormatOptions(),  # noqa: B008 (frozen)
     lines: tuple[int, int] | None = None,
+    debug: DebugOptions = DebugOptions(),  # noqa: B008 (frozen)
 ) -> FormatResult:
     """Format `text`; `lines` is an inclusive 1-based line range."""
     logical = path or STDIN_PATH
@@ -92,7 +80,55 @@ def format_text(
     with parse_text(text, logical) as parsed:
         if parsed.errors:
             raise ChplParseError(parsed.errors)
-        # Milestone 0: the formatter is the identity.
-        result = text
+        index = TokenIndex.build(SourceText.from_text(text), parsed.asts)
+        result = _identity_print(index, options)
+        if not debug.skip_verify:
+            try:
+                verify(
+                    text,
+                    result,
+                    logical,
+                    options,
+                    input_parse=parsed,
+                    input_index=index,
+                )
+            except VerificationError:
+                if debug.dump_failed_dir is not None:
+                    _dump_failed(debug.dump_failed_dir, logical, result)
+                raise
     edits = compute_edits(text, result)
     return FormatResult(result, result != text, edits)
+
+
+def _identity_print(index: TokenIndex, options: FormatOptions) -> str:
+    """Until the printer exists: the input with only comment text normalized."""
+    source = index.source
+    text = source.text
+    spans = verbatim_spans(index)
+    out: list[str] = []
+    pos = 0
+    line = ""  # output text since the last newline
+    for tok in index.tokens:
+        if not tok.is_comment or any(s <= tok.start_offset < e for s, e in spans):
+            continue
+        before = text[pos : tok.start_offset]
+        line = line + before if "\n" not in before else before.rsplit("\n", 1)[1]
+        comment = expected_comment_text(
+            tok.text,
+            input_col=source.display_column(tok.start_offset, options.tab_size),
+            output_col=display_width(line, 0, options.tab_size),
+            tab_size=options.tab_size,
+            comment_spacing=options.comment_spacing,
+        )
+        out += [before, comment]
+        line = line + comment if "\n" not in comment else comment.rsplit("\n", 1)[1]
+        pos = tok.end_offset
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _dump_failed(directory: str, path: str, text: str) -> None:
+    os.makedirs(directory, exist_ok=True)
+    target = os.path.join(directory, os.path.basename(path) + ".failed")
+    with open(target, "w", encoding="utf-8", newline="") as f:
+        f.write(text)

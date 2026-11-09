@@ -371,8 +371,7 @@ class TokenIndex:
 
     def nodes(self) -> Iterator[Node]:
         """Every node except comments, in preorder."""
-        for node, _ in _preorder(self.roots):
-            yield node
+        return iter(self._parent)
 
     # Brackets
 

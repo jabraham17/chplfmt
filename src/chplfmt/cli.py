@@ -94,6 +94,11 @@ def build_parser(cwd: str) -> ArgParser:
     parser.add_argument(
         "--version", action="store_true", help="print chplfmt and Chapel versions"
     )
+    # Development only.
+    parser.add_argument("--debug-dump-failed", metavar="DIR", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--debug-skip-verify", action="store_true", help=argparse.SUPPRESS
+    )
     return parser
 
 
@@ -231,7 +236,10 @@ def _process(
         return EXIT_USAGE
 
     try:
-        result = api.format_text(text, path=inp.display, options=options, lines=lines)
+        debug = api.DebugOptions(args.debug_dump_failed, args.debug_skip_verify)
+        result = api.format_text(
+            text, path=inp.display, options=options, lines=lines, debug=debug
+        )
     except api.ChplParseError as e:
         for diagnostic in e.diagnostics:
             _err(str(diagnostic))
