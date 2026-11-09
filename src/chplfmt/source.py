@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import unicodedata
 from bisect import bisect_right
+from collections.abc import Sequence
+from itertools import repeat
 
 DEFAULT_TAB_SIZE = 2
 
@@ -136,6 +138,22 @@ class SourceText:
         if self._ascii[line - 1]:
             return line, offset - start + 1
         return line, len(self.text[start:offset].encode("utf-8")) + 1
+
+    def positions(self, offsets: Sequence[int]) -> list[Pos]:
+        """`pos` of each offset."""
+        if offsets and not (min(offsets) >= 0 and max(offsets) <= len(self.text)):
+            raise ValueError("offset out of range")
+        starts = self.line_starts
+        lines = list(map(bisect_right, repeat(starts, len(offsets)), offsets))
+        out = [
+            (k, off - starts[k - 1] + 1) for k, off in zip(lines, offsets, strict=True)
+        ]
+        if not all(self._ascii):
+            ascii_ = self._ascii
+            for i, k in enumerate(lines):
+                if not ascii_[k - 1]:
+                    out[i] = self.pos(offsets[i])
+        return out
 
     def offset(self, pos: Pos) -> int:
         """Convert a dyno `(line, byte_col)` position to a code-point offset."""

@@ -18,10 +18,10 @@ from chplfmt._chapel import ParseResult, chapel, parse_text
 from chplfmt.comments import expected_comment_text
 from chplfmt.config import FormatOptions
 from chplfmt.errors import VerificationError
-from chplfmt.lexer import LexError
+from chplfmt.lexer import LexError, TokenKind
 from chplfmt.offregions import verbatim_spans
 from chplfmt.source import Pos, SourceText
-from chplfmt.tokens import Node, TokenIndex
+from chplfmt.tokens import Node, TokenIndex, children
 
 CHECKS = ("reparse", "ast", "tokens", "comments", "verbatim")
 UNKNOWN: Pos = (0, 0)
@@ -268,7 +268,15 @@ def body_delimiter_tokens(index: TokenIndex) -> set[int]:
 
 def user_paren_tokens(index: TokenIndex) -> set[int]:
     found: set[int] = set()
-    for node in index.nodes():
+    # Only nodes owning a `(` can have user parentheses.
+    owners = {
+        index.owner(i)
+        for i, t in enumerate(index.tokens)
+        if t.text == "(" and t.kind is TokenKind.PUNCT
+    }
+    for node in owners:
+        if node is None:
+            continue
         for i, j, _ in index.user_parens(node):
             found.update((i, j))
     return found
@@ -359,6 +367,10 @@ class _Ignore:
 # AST equivalence
 
 
+_VALUE, _PRESENT_KIND, _COUNT = 0, 1, 2
+_Step = tuple[str, int, Callable[[Node], Any]]
+
+
 @cache
 def _plan(cls: type) -> tuple[tuple[str, str], ...]:
     plan: list[tuple[str, str]] = []
@@ -368,6 +380,24 @@ def _plan(cls: type) -> tuple[tuple[str, str], ...]:
         plan += [("present", m) for m in _PRESENT.get(name, ())]
         plan += [("count", m) for m in _COUNTS.get(name, ())]
     return tuple(plan)
+
+
+_KIND_CODES = {"value": _VALUE, "present": _PRESENT_KIND, "count": _COUNT}
+
+
+@cache
+def _steps(cls: type, ignored: frozenset[str]) -> tuple[tuple[_Step, ...], bool, bool]:
+    """`_plan` with unbound methods, plus whether `cls` is a Literal / has actuals."""
+    steps = tuple(
+        (m, _KIND_CODES[kind], cast(Callable[[Node], Any], getattr(cls, m)))
+        for kind, m in _plan(cls)
+        if m not in ignored
+    )
+    return (
+        steps,
+        issubclass(cls, chapel.Literal),
+        issubclass(cls, (chapel.FnCall, chapel.Attribute)),
+    )
 
 
 def _actual_names(node: chapel.FnCall | chapel.Attribute) -> tuple[str | None, ...]:
@@ -382,31 +412,28 @@ def semantic_attrs(
     node: Node, index: TokenIndex, ignored: frozenset[str] = frozenset()
 ) -> tuple[tuple[str, object], ...]:
     """The attributes of `node` that formatting must not change."""
+    steps, is_literal, has_actuals = _steps(type(node), ignored)
     attrs: list[tuple[str, object]] = []
-    for kind, method in _plan(type(node)):
-        if method in ignored:
-            continue
-        value: Any = getattr(node, method)()
-        if kind == "present":
+    for method, kind, fn in steps:
+        value = fn(node)
+        if kind == _PRESENT_KIND:
             value = value is not None
-        elif kind == "count":
+        elif kind == _COUNT:
             value = sum(1 for _ in value)
         attrs.append((method, value))
-    if isinstance(node, chapel.Literal):
+    if is_literal:
         sp = index.node_span(node)
         attrs.append(("token", None if sp is None else index.tokens[sp[0]].text))
-    if isinstance(node, (chapel.FnCall, chapel.Attribute)):
-        attrs.append(("actual_names", _actual_names(node)))
+    if has_actuals:
+        attrs.append(("actual_names", _actual_names(cast(chapel.FnCall, node))))
     return tuple(attrs)
 
 
-def _kids(node: Node, ignore: _Ignore) -> list[Node]:
-    return [
-        c
-        for c in node
-        if not isinstance(c, chapel.Comment)
-        and not (ignore.empty_stmts and isinstance(c, chapel.EmptyStmt))
-    ]
+def _kids(node: Node, ignore: _Ignore, index: TokenIndex | None = None) -> list[Node]:
+    kids = children(node) if index is None else index.ast_children(node)
+    if ignore.empty_stmts:
+        return [c for c in kids if not isinstance(c, chapel.EmptyStmt)]
+    return kids
 
 
 Fingerprint = tuple[str, tuple[tuple[str, object], ...], tuple[Any, ...]]
@@ -420,7 +447,32 @@ def fingerprint(
     return (
         node.tag(),
         semantic_attrs(node, index, ignored),
-        tuple(fingerprint(c, index, ignored) for c in _kids(node, ignore)),
+        tuple(fingerprint(c, index, ignored) for c in _kids(node, ignore, index)),
+    )
+
+
+def _attrs_equal(
+    x: Node, y: Node, ia: TokenIndex, ib: TokenIndex, ignored: frozenset[str]
+) -> bool:
+    """`semantic_attrs(x) == semantic_attrs(y)` for nodes of the same class."""
+    steps, is_literal, has_actuals = _steps(type(x), ignored)
+    for _, kind, fn in steps:
+        u, v = fn(x), fn(y)
+        if kind == _PRESENT_KIND:
+            if (u is None) != (v is None):
+                return False
+        elif kind == _COUNT:
+            if sum(1 for _ in u) != sum(1 for _ in v):
+                return False
+        elif u != v:
+            return False
+    if is_literal:
+        sx, sy = ia.node_span(x), ib.node_span(y)
+        tx = None if sx is None else ia.tokens[sx[0]].text
+        if tx != (None if sy is None else ib.tokens[sy[0]].text):
+            return False
+    return not has_actuals or _actual_names(cast(chapel.FnCall, x)) == _actual_names(
+        cast(chapel.FnCall, y)
     )
 
 
@@ -435,20 +487,28 @@ def _compare_ast(
     stack: list[tuple[Sequence[Node], Sequence[Node], Node | None, Node | None]] = [
         (a, b, None, None)
     ]
+    kids_a, kids_b = ia.ast_children, ib.ast_children
+    empty = chapel.EmptyStmt
+    drop_empty = ignore.empty_stmts
+    ignored = ignore.attrs
     while stack:
         xs, ys, px, py = stack.pop()
         for k in range(max(len(xs), len(ys))):
-            if k >= len(xs) or k >= len(ys) or xs[k].tag() != ys[k].tag():
+            # chapel-py has one class per AST tag.
+            if k >= len(xs) or k >= len(ys) or type(xs[k]) is not type(ys[k]):
                 return (xs[k] if k < len(xs) else px), (ys[k] if k < len(ys) else py)
         pending: list[
             tuple[Sequence[Node], Sequence[Node], Node | None, Node | None]
         ] = []
         for x, y in zip(xs, ys, strict=True):
-            if semantic_attrs(x, ia, ignore.attrs) != semantic_attrs(
-                y, ib, ignore.attrs
-            ):
+            if not _attrs_equal(x, y, ia, ib, ignored):
                 return x, y
-            pending.append((_kids(x, ignore), _kids(y, ignore), x, y))
+            kx, ky = kids_a(x), kids_b(y)
+            if kx or ky:
+                if drop_empty:
+                    kx = [c for c in kx if not isinstance(c, empty)]
+                    ky = [c for c in ky if not isinstance(c, empty)]
+                pending.append((kx, ky, x, y))
         stack.extend(reversed(pending))
     return None
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from enum import StrEnum
+from typing import NamedTuple
 
 from chplfmt.source import Pos, SourceText
 
@@ -24,8 +24,8 @@ class TokenKind(StrEnum):
 COMMENT_KINDS = frozenset({TokenKind.LINE_COMMENT, TokenKind.BLOCK_COMMENT})
 
 
-@dataclass(frozen=True, slots=True)
-class Token:
+class Token(NamedTuple):
+    # A NamedTuple: building ~10^5 tokens per file is much cheaper than a dataclass.
     kind: TokenKind
     text: str
     start_offset: int  # code-point offsets into SourceText.text; end is exclusive
@@ -67,7 +67,6 @@ _PUNCT_BY_LEN = tuple(
     frozenset(p for p in PUNCTUATION if len(p) == n) for n in (3, 2, 1)
 )
 
-_WS_RE = re.compile(r"[ \t\r\n\f]*")
 _IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")  # chpl.lex has no `$`
 _IDENT_START = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
 _DIGITS = frozenset("0123456789")
@@ -99,6 +98,24 @@ _NUMBER_RES = tuple(
 
 # Keywords that dyno lexes together with the next character (`proc(` is split).
 _GLUED = {"try": "!", "init": "=", "reduce": "="}
+
+# Whitespace, then (in the common cases) an identifier or punctuation that
+# `_scan` would return unchanged; anything else goes through `_scan`.
+_SLOW_WORDS = frozenset({"b", *_GLUED})
+_GUARDS = {
+    "/": "(?![/*])",
+    ".": "(?![0-9])",
+    "?": "(?![A-Za-z_])",
+    "@": "(?![A-Za-z_])",
+}
+_FAST_RE = re.compile(
+    r"([ \t\r\n\f]*)(?:([A-Za-z_][A-Za-z0-9_]*)|("
+    + "|".join(
+        re.escape(p) + _GUARDS.get(p, "")
+        for p in sorted(PUNCTUATION, key=len, reverse=True)
+    )
+    + "))?"
+)
 
 
 def _match_end(regex: re.Pattern[str], text: str, pos: int) -> int:
@@ -196,11 +213,14 @@ def tokenize(source: SourceText, opaque: Iterable[tuple[int, int]] = ()) -> list
     n = len(text)
     ranges = sorted(opaque)
     ri = 0
+    fast = _FAST_RE.match
     raw: list[tuple[TokenKind, int, int, int]] = []
     pos = 0
     while True:
         gap_start = pos
-        pos = _match_end(_WS_RE, text, pos)
+        m = fast(text, pos)
+        assert m is not None
+        pos = m.end(1)
         next_opaque = ranges[ri][0] if ri < len(ranges) else n + 1
         if next_opaque < pos:
             raise LexError(source, next_opaque, "opaque range starts inside whitespace")
@@ -210,7 +230,13 @@ def tokenize(source: SourceText, opaque: Iterable[tuple[int, int]] = ()) -> list
             kind, end = TokenKind.OPAQUE, ranges[ri][1]
             ri += 1
         else:
-            kind, end = _scan(source, pos)
+            g = m.lastindex
+            if g == 2 and m.group(2) not in _SLOW_WORDS:
+                kind, end = TokenKind.IDENT, m.end()
+            elif g == 3:
+                kind, end = TokenKind.PUNCT, m.end()
+            else:
+                kind, end = _scan(source, pos)
             if end > next_opaque:
                 raise LexError(
                     source, next_opaque, "opaque range starts inside a token"
@@ -239,21 +265,28 @@ def tokenize(source: SourceText, opaque: Iterable[tuple[int, int]] = ()) -> list
             source, raw[stack[-1]][2], f"unmatched {text[raw[stack[-1]][2]]!r}"
         )
 
-    pos_of = source.pos
-    return [
-        Token(
-            kind=kind,
-            text=text[start:end],
-            start_offset=start,
-            end_offset=end,
-            start=pos_of(start),
-            end=pos_of(end),
-            nl_before=text.count("\n", gap, start),
-            ws_before=start > gap,
-            match=matches[i],
-        )
-        for i, (kind, gap, start, end) in enumerate(raw)
+    starts = [r[2] for r in raw]
+    ends = [r[3] for r in raw]
+    start_pos = source.positions(starts)
+    end_pos = source.positions(ends)
+    # The gap begins at the previous token's end, so this counts its newlines.
+    nl_before = [
+        p[0] - q[0] for p, q in zip(start_pos, [(1, 1), *end_pos], strict=False)
     ]
+    return list(
+        map(
+            Token,
+            [r[0] for r in raw],
+            [text[s:e] for s, e in zip(starts, ends, strict=True)],
+            starts,
+            ends,
+            start_pos,
+            end_pos,
+            nl_before,
+            [r[2] > r[1] for r in raw],
+            matches,
+        )
+    )
 
 
 def check_invariants(source: SourceText, tokens: Sequence[Token]) -> list[str]:

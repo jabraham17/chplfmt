@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from collections.abc import Iterable, Iterator, Sequence
+from functools import cache
+from typing import cast
 
 from chplfmt._chapel import chapel
 from chplfmt.lexer import OPEN_BRACKETS, Token, TokenKind, tokenize
@@ -30,11 +32,37 @@ _FIRST_PAREN = (
     chapel.FunctionSignature,
 )
 
+_LEAF, _BLOCK, _ATTR_GROUP, _ARRAY_ROW, _MODULE, _FORMAL = range(6)
+_SIGNATURE, _ATTRIBUTE, _NEW, _OTHER = range(6, 10)
+_CATEGORIES: tuple[tuple[int, type | tuple[type, ...]], ...] = (
+    (_LEAF, _LEAVES),
+    (_BLOCK, chapel.Block),
+    (_ATTR_GROUP, chapel.AttributeGroup),
+    (_ARRAY_ROW, chapel.ArrayRow),
+    (_MODULE, chapel.Module),
+    (_FORMAL, chapel.Formal),
+    (_SIGNATURE, chapel.FunctionSignature),
+    (_ATTRIBUTE, chapel.Attribute),
+    (_NEW, chapel.New),
+)
+
+
+@cache
+def _category(cls: type) -> int:
+    """Which `_base_span` case applies to nodes of class `cls`."""
+    return next((k for k, c in _CATEGORIES if issubclass(cls, c)), _OTHER)
+
 
 def opaque_ranges(source: SourceText, asts: Iterable[Node]) -> list[tuple[int, int]]:
     """Offsets of every `ExternBlock` (`extern { ... }`), for the lexer."""
+    return _opaque_ranges(source, _walk(asts)[0])
+
+
+def _opaque_ranges(
+    source: SourceText, order: list[tuple[Node, Node | None]]
+) -> list[tuple[int, int]]:
     ranges: list[tuple[int, int]] = []
-    for node, _ in _preorder(asts):
+    for node, _ in order:
         if isinstance(node, chapel.ExternBlock):
             loc = node.location()
             ranges.append((source.offset(loc.start()), source.offset(loc.end())))
@@ -46,23 +74,40 @@ def children(node: Node) -> list[Node]:
     return [c for c in node if not isinstance(c, chapel.Comment)]
 
 
-def _preorder(roots: Iterable[Node]) -> Iterator[tuple[Node, Node | None]]:
+_Walk = tuple[list[tuple[Node, Node | None]], dict[Node, list[Node]]]
+
+
+def _walk(roots: Iterable[Node]) -> _Walk:
+    """`(node, parent)` in preorder, and each node's `children`."""
+    comment = chapel.Comment
+    order: list[tuple[Node, Node | None]] = []
+    kids: dict[Node, list[Node]] = {}
     stack: list[tuple[Node, Node | None]] = [(r, None) for r in reversed(list(roots))]
     while stack:
-        node, parent = stack.pop()
-        yield node, parent
-        stack.extend((c, node) for c in reversed(children(node)))
+        item = stack.pop()
+        order.append(item)
+        node = item[0]
+        ks = [c for c in node if not isinstance(c, comment)]
+        kids[node] = ks
+        stack.extend([(c, node) for c in reversed(ks)])
+    return order, kids
 
 
 class TokenIndex:
     """Tokens of one file joined to its AST."""
 
     def __init__(
-        self, source: SourceText, tokens: Sequence[Token], asts: Iterable[Node]
+        self,
+        source: SourceText,
+        tokens: Sequence[Token],
+        asts: Iterable[Node],
+        *,
+        walk: _Walk | None = None,
     ):
         self.source = source
         self.tokens: list[Token] = list(tokens)
         self.roots: list[Node] = list(asts)
+        self._order, self._ast_kids = walk or _walk(self.roots)
         self.by_start: dict[Pos, int] = {t.start: i for i, t in enumerate(self.tokens)}
         self.by_end: dict[Pos, int] = {}
         for i, t in enumerate(self.tokens):
@@ -87,7 +132,9 @@ class TokenIndex:
     @classmethod
     def build(cls, source: SourceText, asts: Sequence[Node]) -> TokenIndex:
         """Tokenize `source` (with its extern blocks opaque) and index it."""
-        return cls(source, tokenize(source, opaque_ranges(source, asts)), asts)
+        walk = _walk(asts)
+        tokens = tokenize(source, _opaque_ranges(source, walk[0]))
+        return cls(source, tokens, asts, walk=walk)
 
     # Location lookup
 
@@ -131,43 +178,49 @@ class TokenIndex:
     def _base_span(
         self, node: Node, parent: Node | None, kid_spans: list[Span]
     ) -> Span | None:
+        cat = _category(type(node))
         loc = node.location()
-        if isinstance(node, _LEAVES):
+        start = loc.start()
+        if cat == _LEAF:
             # A leaf is one token. `owned C?` and `domain(2)` report the called
             # Identifier with the whole call's location.
-            if loc.start()[0] < 1:
+            if start[0] < 1:
                 return None
-            i = self._token_at(loc.start())
+            i = self._token_at(start)
             return (i, i) if self.tokens[i].kind is not TokenKind.EOF else None
-        if isinstance(node, chapel.Block):
-            return self._block_span(node, parent, kid_spans)
-        if isinstance(node, (chapel.AttributeGroup, chapel.ArrayRow)):
+        if cat == _BLOCK:
+            return self._block_span(cast(chapel.Block, node), parent, kid_spans)
+        if cat in (_ATTR_GROUP, _ARRAY_ROW):
             # AttributeGroup reports the start of the declaration; the first
             # ArrayRow of a multi-dimensional literal reports the whole array.
-            if isinstance(node, chapel.AttributeGroup) and parent is not None:
+            if cat == _ATTR_GROUP and parent is not None:
                 return self._attribute_group_span(parent, kid_spans)
             return None
-        if isinstance(node, chapel.Module) and node.kind() == "implicit":
+        if cat == _MODULE and cast(chapel.Module, node).kind() == "implicit":
             # An implicit module's location is empty; it owns the whole file.
             return (0, len(self.tokens) - 2) if len(self.tokens) > 1 else None
         # An implicit `this` reports the method name's location; an
         # interface's implicit `Self` reports the whole interface.
         if (
-            isinstance(node, chapel.Formal)
+            cat == _FORMAL
             and not kid_spans
-            and (node.is_this() or node.name_location().start()[0] < 1)
+            and (
+                (formal := cast(chapel.Formal, node)).is_this()
+                or formal.name_location().start()[0] < 1
+            )
         ):
             return None
-        sp = self.span(loc)
+        end = loc.end()
+        sp = self.span((start, end))
         if sp is None:
             return None
         first, last = sp
-        if isinstance(node, chapel.FunctionSignature) or loc.end() in self._sig_ends:
+        if cat == _SIGNATURE or end in self._sig_ends:
             # `proc(): int` reports one token too many (`;`, `,`, `)`, `=`, `{`),
             # and so does a parent ending with it, e.g. a Formal or Variable.
-            self._sig_ends.add(loc.end())
+            self._sig_ends.add(end)
             last = self.prev_code(last) or first
-        if isinstance(node, chapel.Attribute):
+        if cat == _ATTRIBUTE:
             # Attribute locations cover only `@name`; add `.part`s and `(...)`.
             while (
                 self.tokens[n := self.next_code(last)].text == "."
@@ -176,7 +229,7 @@ class TokenIndex:
                 last = m
             if self.tokens[n := self.next_code(last)].text == "(":
                 last = self._match(n)
-        elif isinstance(node, chapel.New) and kid_spans:
+        elif cat == _NEW and kid_spans:
             # `new C(1)` reports New with the whole FnCall's location.
             last = self._close_parens(first, max(s[1] for s in kid_spans))
         return first, last
@@ -221,21 +274,29 @@ class TokenIndex:
             last = n
 
     def _compute_spans(self) -> None:
-        order = list(_preorder(self.roots))
+        order = self._order
         for node, parent in order:
             self._parent[node] = parent
+        spans = self._spans
         for node, parent in reversed(order):
-            kids = children(node)
-            kid_spans = [s for k in kids if (s := self._spans[k]) is not None]
+            kids = self._ast_kids[node]
+            if not kids:
+                spans[node] = self._base_span(node, parent, [])
+                self._kids[node] = []
+                continue
+            kid_spans = [s for k in kids if (s := spans[k]) is not None]
             base = self._base_span(node, parent, kid_spans)
-            spans = [s for s in (base, *kid_spans) if s is not None]
-            self._spans[node] = (
-                (min(s[0] for s in spans), max(s[1] for s in spans)) if spans else None
+            if base is not None:
+                kid_spans.append(base)
+            spans[node] = (
+                (min(s[0] for s in kid_spans), max(s[1] for s in kid_spans))
+                if kid_spans
+                else None
             )
-            self._kids[node] = sorted(
-                (k for k in kids if self._spans[k] is not None),
-                key=lambda k: self._spans[k] or (0, 0),
-            )
+            own_kids = [k for k in kids if spans[k] is not None]
+            if len(own_kids) > 1:
+                own_kids.sort(key=lambda k: spans[k] or (0, 0))
+            self._kids[node] = own_kids
 
     def _attribute_group_span(self, decl: Node, kid_spans: list[Span]) -> Span | None:
         # Pragmas aren't nodes: walk back from the declaration over
@@ -327,7 +388,8 @@ class TokenIndex:
     # Ownership
 
     def _compute_ownership(self) -> None:
-        for node, _ in _preorder(self.roots):
+        owner = self._owner
+        for node, _ in self._order:
             sp = self._spans[node]
             own: list[int] = []
             self._own[node] = own
@@ -343,12 +405,14 @@ class TokenIndex:
                         f"{kid.tag()} at {kid.location().start()} overlaps "
                         f"{prev[0].tag()} at {prev[0].location().start()}"
                     )
-                own.extend(range(i, ks[0]))
+                if i < ks[0]:
+                    own.extend(range(i, ks[0]))
+                    owner[i : ks[0]] = [node] * (ks[0] - i)
                 i = max(i, ks[1] + 1)
                 prev = (kid, ks)
-            own.extend(range(i, sp[1] + 1))
-            for t in own:
-                self._owner[t] = node
+            if i <= sp[1]:
+                own.extend(range(i, sp[1] + 1))
+                owner[i : sp[1] + 1] = [node] * (sp[1] + 1 - i)
 
     def owner(self, i: int) -> Node | None:
         """The deepest node whose span contains token `i` (None outside every node).
@@ -365,6 +429,11 @@ class TokenIndex:
     def children(self, node: Node) -> list[Node]:
         """Children that have tokens, in source order."""
         return self._kids.get(node, [])
+
+    def ast_children(self, node: Node) -> list[Node]:
+        """All children except comments, in AST order (cached `children(node)`)."""
+        kids = self._ast_kids.get(node)
+        return children(node) if kids is None else kids
 
     def parent(self, node: Node) -> Node | None:
         return self._parent.get(node)
@@ -437,8 +506,12 @@ class TokenIndex:
         if cached is not None:
             return cached
         found: list[tuple[int, int, Node]] = []
-        structural = set(self.structural_brackets(node))
         own = self.own_tokens(node)
+        tokens = self.tokens
+        if not any(tokens[i].text == "(" for i in own):
+            self._user_parens[node] = found
+            return found
+        structural = set(self.structural_brackets(node))
         for i in own:
             tok = self.tokens[i]
             if tok.text != "(" or tok.kind is not TokenKind.PUNCT or i in structural:
