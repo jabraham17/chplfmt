@@ -8,14 +8,14 @@ import os
 from bisect import bisect_left
 from collections.abc import Generator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from chplfmt._chapel import Diagnostic, parse_text
-from chplfmt.comments import expected_comment_text
 from chplfmt.config import FormatOptions, load_options
+from chplfmt.doc import render
 from chplfmt.errors import ChplParseError, FormatError, VerificationError
-from chplfmt.offregions import verbatim_spans
-from chplfmt.source import SourceText, display_width
+from chplfmt.printer import Printer, PrintReport
+from chplfmt.source import SourceText
 from chplfmt.tokens import TokenIndex
 from chplfmt.verify import verify
 
@@ -47,6 +47,10 @@ class FormatResult:
     text: str
     changed: bool
     edits: list[TextEdit]
+    # Internal: rule applications and fallbacks (for --check --verbose, tests).
+    report: PrintReport = field(
+        default_factory=PrintReport, compare=False, repr=False, kw_only=True
+    )
 
 
 @dataclass(frozen=True)
@@ -177,7 +181,7 @@ def format_text(
         if parsed.errors:
             raise ChplParseError(parsed.errors)
         index = TokenIndex.build(SourceText.from_text(text), parsed.asts)
-        result = _identity_print(index, options)
+        result, report = _print_text(index, options)
         if not debug.skip_verify:
             try:
                 verify(
@@ -193,34 +197,12 @@ def format_text(
                     _dump_failed(debug.dump_failed_dir, logical, result)
                 raise
     edits = compute_edits(text, result)
-    return FormatResult(result, result != text, edits)
+    return FormatResult(result, result != text, edits, report=report)
 
 
-def _identity_print(index: TokenIndex, options: FormatOptions) -> str:
-    """Until the printer exists: the input with only comment text normalized."""
-    source = index.source
-    text = source.text
-    spans = verbatim_spans(index)
-    out: list[str] = []
-    pos = 0
-    line = ""  # output text since the last newline
-    for tok in index.tokens:
-        if not tok.is_comment or any(s <= tok.start_offset < e for s, e in spans):
-            continue
-        before = text[pos : tok.start_offset]
-        line = line + before if "\n" not in before else before.rsplit("\n", 1)[1]
-        comment = expected_comment_text(
-            tok.text,
-            input_col=source.display_column(tok.start_offset, options.tab_size),
-            output_col=display_width(line, 0, options.tab_size),
-            tab_size=options.tab_size,
-            comment_spacing=options.comment_spacing,
-        )
-        out += [before, comment]
-        line = line + comment if "\n" not in comment else comment.rsplit("\n", 1)[1]
-        pos = tok.end_offset
-    out.append(text[pos:])
-    return "".join(out)
+def _print_text(index: TokenIndex, options: FormatOptions) -> tuple[str, PrintReport]:
+    p = Printer(index, options)
+    return render(p.print_file(), options).text, p.report
 
 
 def _dump_failed(directory: str, path: str, text: str) -> None:

@@ -10,6 +10,7 @@ from chplfmt.comments import expected_comment_text, space_line_comment
 from chplfmt.config import FormatOptions
 from chplfmt.errors import VerificationError
 from chplfmt.offregions import find_off_regions, verbatim_spans
+from chplfmt.printer import PrintReport
 from chplfmt.source import SourceText
 from chplfmt.tokens import TokenIndex
 
@@ -338,7 +339,9 @@ def test_off_region_detection() -> None:
 def test_format_text_verifies_and_dumps(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(api, "_identity_print", lambda index, options: "var y;\n")
+    monkeypatch.setattr(
+        api, "_print_text", lambda index, options: ("var y;\n", PrintReport())
+    )
     with pytest.raises(VerificationError) as info:
         api.format_text("var x;\n", path="d/a.chpl")
     assert info.value.check == "ast"
@@ -367,7 +370,9 @@ def test_cli_debug_flags(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     Path("a.chpl").write_text("var x;\n")
-    monkeypatch.setattr(api, "_identity_print", lambda index, options: "var y;\n")
+    monkeypatch.setattr(
+        api, "_print_text", lambda index, options: ("var y;\n", PrintReport())
+    )
     assert main(["a.chpl", "--debug-dump-failed", "dump"]) == 4
     assert "failed verification (ast) at input 1:1 / output 1:1" in (
         capsys.readouterr().err

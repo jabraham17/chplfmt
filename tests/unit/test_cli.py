@@ -44,7 +44,7 @@ def uppercase(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_stdin_to_stdout(set_stdin: Callable[[bytes], None], capsys: Any) -> None:
     set_stdin(b"var x = 1;\r\nproc f() { }\n")
     assert main(["-"]) == 0
-    assert capsys.readouterr().out == "var x = 1;\r\nproc f() { }\n"
+    assert capsys.readouterr().out == "var x = 1;\nproc f() { }\n"
 
 
 def test_stdin_parse_error(set_stdin: Callable[[bytes], None], capsys: Any) -> None:
@@ -331,3 +331,44 @@ def test_python_m(tmp_path: Path) -> None:
         check=False,
     )
     assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+
+
+# End to end with the real formatter
+
+MESSY = "\n  var a = 1;  \r\n\r\n\r\n\r\n//b\r\nvar c;"
+TIDY = "var a = 1;\n\n// b\nvar c;\n"
+
+
+def test_e2e_stdout(capsys: Any) -> None:
+    write("a.chpl", MESSY)
+    assert main(["a.chpl"]) == 0
+    assert capsys.readouterr() == (TIDY, "")
+    assert Path("a.chpl").read_bytes() == MESSY.encode()
+
+
+def test_e2e_in_place(capsys: Any) -> None:
+    p = write("a.chpl", MESSY)
+    assert main(["-i", "a.chpl"]) == 0
+    assert capsys.readouterr() == ("", "")
+    assert p.read_bytes() == TIDY.encode()
+    assert main(["--check", "a.chpl"]) == 0
+
+
+def test_e2e_check(capsys: Any) -> None:
+    write("a.chpl", MESSY)
+    assert main(["--check", "-v", "a.chpl"]) == 1
+    assert capsys.readouterr() == (
+        "",
+        "would reformat a.chpl\n"
+        "  changed lines: 1, 2-7\n"
+        "  rule applications: comment-spacing: 1\n",
+    )
+
+
+def test_e2e_diff(capsys: Any) -> None:
+    write("a.chpl", "var a;  \n\n\n\nvar b;\n")
+    assert main(["--diff", "a.chpl"]) == 0
+    assert capsys.readouterr().out == (
+        "--- a.chpl\t(original)\n+++ a.chpl\t(formatted)\n"
+        "@@ -1,5 +1,3 @@\n-var a;  \n-\n-\n+var a;\n \n var b;\n"
+    )

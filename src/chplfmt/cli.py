@@ -270,6 +270,10 @@ def _process(
         if args.verbose:
             ranges = [_line_range(e.start_line, e.end_line) for e in result.edits]
             _err(f"  changed lines: {', '.join(ranges)}")
+            counts = result.report.rule_counts()
+            if counts:
+                rules = ", ".join(f"{k}: {n}" for k, n in sorted(counts.items()))
+                _err(f"  rule applications: {rules}")
         return EXIT_CHANGED
     return EXIT_OK
 
