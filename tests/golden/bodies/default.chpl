@@ -1,0 +1,89 @@
+// Section 8.3 examples
+proc double(x: int) do return 2 * x;
+
+proc f() {
+  begin f();
+  defer cleanup();
+  sync spawnAll();
+  begin with (ref result) compute(result);
+}
+
+proc shiftLeft(x: vectorType(eltType, numElts), param shift: int): x.type {
+  return implType(eltType, numElts).shiftLeftImm(x, shift);
+}
+
+// Fits on one line
+proc oneLine() { return 1; }
+iter it() { yield 1; }
+proc stmts() {
+  begin { f(); }
+  sync { g(); }
+  defer { cleanup(); }
+  serial c do f();
+  serial c { f(); }
+  local do f();
+  local c { f(); }
+  on Locales[1] do f();
+  on Locales[1] { f(); }
+  manage m as x, n do f();
+  manage m { f(); }
+  serial do { f(); }
+  on here do { x = 1; }
+}
+
+// Next-line form
+proc nextLine() {
+  on Locales[someLocaleIndex] do someFunctionWithALongName(argumentNumberOne, two);
+  serial someVeryLongConditionName && anotherVeryLongConditionName do callIt(x);
+}
+
+// Braces fallback
+proc tooLong() {
+  begin someFunctionWithAVeryLongName(argumentNumberOne, argumentNumberTwo, three);
+  on Locales[1] do someFunctionWithAVeryLongName(argumentNumberOne, argumentNumberTwo, argumentNumberThree);
+  defer { a(); b(); }
+  serial do on here do f();
+}
+
+// Comments disqualify the single-line form
+proc comments() {
+  serial c do // why
+    f();
+  serial c do /* inline */ f();
+  serial c { f(); // inside
+  }
+  begin { /* inside */ f(); }
+  on here do f(); // after the body
+}
+proc commented() { // why
+  return 1;
+}
+
+// Empty bodies
+proc empties() {
+  serial do ;
+  local c do ;
+  on here { }
+  sync { }
+}
+
+cobegin with (ref x, ref y) { a(); b(); }
+
+select x {
+  when 1 do writeln("one");
+  when 2, 3 {
+    writeln("two or three");
+    count += 1;
+  }
+  otherwise do writeln("other");
+}
+
+select y { when 1 { f(); } otherwise { g(); } }
+
+try { f(); } catch e: IllegalArgumentError { handle(e); } catch { halt(); }
+try! { f(); g(); }
+try! f();
+var z = try! g();
+try { f(); } catch (e: Error) { }
+
+begin with (ref aVeryLongVariableName, ref anotherVeryLongVariableName, const in y) f();

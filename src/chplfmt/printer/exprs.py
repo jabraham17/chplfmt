@@ -37,6 +37,12 @@ from chplfmt.trivia import Placement
 def statement(p: Printer, node: Node, d: Doc) -> Doc:
     """`d` with its `;` if `node` is an expression statement."""
     parent = p.index.parent(node)
+    if isinstance(parent, chapel.Try):
+        # `try! x = f();`: the assignment, not the `try`, owns the `;`.
+        sp = p.index.node_span(node)
+        if sp is None or p.tokens[sp[1]].text != ";":
+            return d
+        return semicolon(p, node, d)
     if not is_statement_list(parent):
         return d
     stmt = p.index.stmt_span(node)

@@ -1,4 +1,2 @@
 var x = 1;
-proc f() {
-  x = 2;
-}
+proc f() do x = 2;

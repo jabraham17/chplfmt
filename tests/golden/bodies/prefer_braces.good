@@ -1,0 +1,181 @@
+// Section 8.3 examples
+proc double(x: int) {
+  return 2 * x;
+}
+
+proc f() {
+  begin {
+    f();
+  }
+  defer {
+    cleanup();
+  }
+  sync {
+    spawnAll();
+  }
+  begin with (ref result) {
+    compute(result);
+  }
+}
+
+proc shiftLeft(x: vectorType(eltType, numElts), param shift: int): x.type {
+  return implType(eltType, numElts).shiftLeftImm(x, shift);
+}
+
+// Fits on one line
+proc oneLine() {
+  return 1;
+}
+iter it() {
+  yield 1;
+}
+proc stmts() {
+  begin {
+    f();
+  }
+  sync {
+    g();
+  }
+  defer {
+    cleanup();
+  }
+  serial c {
+    f();
+  }
+  serial c {
+    f();
+  }
+  local {
+    f();
+  }
+  local c {
+    f();
+  }
+  on Locales[1] {
+    f();
+  }
+  on Locales[1] {
+    f();
+  }
+  manage m as x, n {
+    f();
+  }
+  manage m {
+    f();
+  }
+  serial {
+    f();
+  }
+  on here {
+    x = 1;
+  }
+}
+
+// Next-line form
+proc nextLine() {
+  on Locales[someLocaleIndex] {
+    someFunctionWithALongName(argumentNumberOne, two);
+  }
+  serial someVeryLongConditionName && anotherVeryLongConditionName {
+    callIt(x);
+  }
+}
+
+// Braces fallback
+proc tooLong() {
+  begin {
+    someFunctionWithAVeryLongName(argumentNumberOne, argumentNumberTwo, three);
+  }
+  on Locales[1] {
+    someFunctionWithAVeryLongName(argumentNumberOne, argumentNumberTwo,
+                                  argumentNumberThree);
+  }
+  defer {
+    a();
+    b();
+  }
+  serial {
+    on here {
+      f();
+    }
+  }
+}
+
+// Comments disqualify the single-line form
+proc comments() {
+  serial c { // why
+    f();
+  }
+  serial c {
+    /* inline */ f();
+  }
+  serial c {
+    f(); // inside
+  }
+  begin {
+    /* inside */ f();
+  }
+  on here {
+    f();
+  } // after the body
+}
+proc commented() { // why
+  return 1;
+}
+
+// Empty bodies
+proc empties() {
+  serial { }
+  local c { }
+  on here { }
+  sync { }
+}
+
+cobegin with (ref x, ref y) {
+  a();
+  b();
+}
+
+select x {
+  when 1 {
+    writeln("one");
+  }
+  when 2, 3 {
+    writeln("two or three");
+    count += 1;
+  }
+  otherwise {
+    writeln("other");
+  }
+}
+
+select y {
+  when 1 {
+    f();
+  }
+  otherwise {
+    g();
+  }
+}
+
+try {
+  f();
+} catch e: IllegalArgumentError {
+  handle(e);
+} catch {
+  halt();
+}
+try! {
+  f();
+  g();
+}
+try! f();
+var z = try! g();
+try {
+  f();
+} catch (e: Error) { }
+
+begin with (ref aVeryLongVariableName, ref anotherVeryLongVariableName,
+            const in y) {
+  f();
+}

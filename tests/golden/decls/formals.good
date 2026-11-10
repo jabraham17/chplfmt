@@ -14,9 +14,8 @@ proc alignedBinPack(firstArgument: int, secondArgument: real,
                     thirdArgument: string, fourthArgument: bool) { }
 
 proc returnsAfterBinPack(firstArgument: int, secondArgument: real,
-                         thirdArgument: string): int {
+                         thirdArgument: string): int do
   return 0;
-}
 
 proc thisIsAnExtremelyLongProcedureNameThatForcesTheBreakAfterParenFallback(
   alpha: int, beta: int
@@ -24,9 +23,8 @@ proc thisIsAnExtremelyLongProcedureNameThatForcesTheBreakAfterParenFallback(
 
 proc fallbackWithReturnType_______________________________________(
   alpha: int, beta: int
-): real throws {
+): real throws do
   return 0.0;
-}
 
 extern proc fallbackNoBody_________________________________________________(
   alpha: int, beta: int

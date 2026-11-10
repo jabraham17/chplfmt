@@ -79,6 +79,21 @@ COVERED = frozenset(
         "ExternBlock",
         "Init",
         "EmptyStmt",
+        "Begin",
+        "Cobegin",
+        "Sync",
+        "Defer",
+        "Serial",
+        "Local",
+        "On",
+        "Manage",
+        "Try",
+        "Catch",
+        "Select",
+        "When",
+        "WithClause",
+        "TaskVar",
+        "ReduceIntent",
     }
 )
 

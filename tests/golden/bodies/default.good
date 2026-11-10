@@ -1,0 +1,125 @@
+// Section 8.3 examples
+proc double(x: int) do return 2 * x;
+
+proc f() {
+  begin f();
+  defer cleanup();
+  sync spawnAll();
+  begin with (ref result) compute(result);
+}
+
+proc shiftLeft(x: vectorType(eltType, numElts), param shift: int): x.type do
+  return implType(eltType, numElts).shiftLeftImm(x, shift);
+
+// Fits on one line
+proc oneLine() do return 1;
+iter it() do yield 1;
+proc stmts() {
+  begin f();
+  sync g();
+  defer cleanup();
+  serial c do f();
+  serial c do f();
+  local do f();
+  local c do f();
+  on Locales[1] do f();
+  on Locales[1] do f();
+  manage m as x, n do f();
+  manage m do f();
+  serial do f();
+  on here do x = 1;
+}
+
+// Next-line form
+proc nextLine() {
+  on Locales[someLocaleIndex] do
+    someFunctionWithALongName(argumentNumberOne, two);
+  serial someVeryLongConditionName && anotherVeryLongConditionName do callIt(x);
+}
+
+// Braces fallback
+proc tooLong() {
+  begin {
+    someFunctionWithAVeryLongName(argumentNumberOne, argumentNumberTwo, three);
+  }
+  on Locales[1] {
+    someFunctionWithAVeryLongName(argumentNumberOne, argumentNumberTwo,
+                                  argumentNumberThree);
+  }
+  defer {
+    a();
+    b();
+  }
+  serial {
+    on here do f();
+  }
+}
+
+// Comments disqualify the single-line form
+proc comments() {
+  serial c { // why
+    f();
+  }
+  serial c {
+    /* inline */ f();
+  }
+  serial c {
+    f(); // inside
+  }
+  begin {
+    /* inside */ f();
+  }
+  on here do f(); // after the body
+}
+proc commented() { // why
+  return 1;
+}
+
+// Empty bodies
+proc empties() {
+  serial do ;
+  local c do ;
+  on here { }
+  sync { }
+}
+
+cobegin with (ref x, ref y) {
+  a();
+  b();
+}
+
+select x {
+  when 1 do writeln("one");
+  when 2, 3 {
+    writeln("two or three");
+    count += 1;
+  }
+  otherwise do writeln("other");
+}
+
+select y {
+  when 1 do f();
+  otherwise do g();
+}
+
+try {
+  f();
+} catch e: IllegalArgumentError {
+  handle(e);
+} catch {
+  halt();
+}
+try! {
+  f();
+  g();
+}
+try! f();
+var z = try! g();
+try {
+  f();
+} catch (e: Error) { }
+
+begin with (ref aVeryLongVariableName, ref anotherVeryLongVariableName,
+            const in y) {
+  f();
+}

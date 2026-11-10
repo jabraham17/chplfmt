@@ -9,19 +9,31 @@ import itertools
 from contextlib import ExitStack
 
 from chplfmt._chapel import chapel
-from chplfmt.doc import EMPTY, Doc, concat, hardline, indent, text
+from chplfmt.doc import EMPTY, Doc, concat, conditional_group, hardline, indent, text
+from chplfmt.printer.body import Body, Form
 from chplfmt.printer.common import (
+    attach_body,
     attribute_group,
+    body_statements,
     braced,
+    ends_line,
     header_start,
+    open_brace,
     semicolon,
     tokens_doc,
     with_attributes,
 )
 from chplfmt.printer.core import Printer, printer
 from chplfmt.printer.exprs import outer_start, token_text
-from chplfmt.printer.lists import aligned_expr, bracket_list, list_fill
+from chplfmt.printer.lists import (
+    ListKind,
+    aligned_expr,
+    bracket_layouts,
+    bracket_list,
+    list_fill,
+)
 from chplfmt.tokens import Node
+from chplfmt.trivia import Placement
 
 
 @printer(chapel.Block)
@@ -183,3 +195,174 @@ def print_extern_block(p: Printer, node: Node) -> Doc | None:
 @printer(chapel.EmptyStmt)
 def print_empty_stmt(p: Printer, node: Node) -> Doc:
     return text(";")
+
+
+# Statements with bodies (sections 7.8, 8.2, 8.3, 8.9)
+
+
+def _before(p: Printer, i: int) -> int:
+    j = p.index.prev_code(i)
+    assert j is not None
+    return j
+
+
+def _header_last(p: Printer, node: Node, first: int, kids: list[Node]) -> int | None:
+    """Last header token: before the node's own `do`/`{`, else before its first body statement."""
+    own = [
+        i
+        for i in p.index.own_tokens(node)
+        if i > first and p.tokens[i].text in ("do", "{")
+    ]
+    if own:
+        start = own[0]
+    elif kids:
+        start = outer_start(p, kids[0])
+    else:
+        return None
+    return _before(p, start)
+
+
+@printer(
+    chapel.Begin,
+    chapel.Cobegin,
+    chapel.Sync,
+    chapel.Defer,
+    chapel.Serial,
+    chapel.Local,
+    chapel.On,
+    chapel.Manage,
+)
+def print_block_stmt(p: Printer, node: Node) -> Doc | None:
+    """`begin with (...) S;`, `sync { }`, `on x do S;`, `cobegin { }`, ..."""
+    first = header_start(p, node)
+    head: list[Node] = []
+    if isinstance(node, chapel.Begin | chapel.Cobegin):
+        wc = node.with_clause()
+        head = [] if wc is None else [wc]
+    elif isinstance(node, chapel.Serial | chapel.Local):
+        cond = node.condition()
+        head = [] if cond is None else [cond]
+    elif isinstance(node, chapel.On):
+        head = [node.destination()]
+    elif isinstance(node, chapel.Manage):
+        head = list(node.managers())
+    attrs = attribute_group(p, node)
+    body_kids = [k for k in _kids(p, node) if k is not attrs and k not in head]
+    hl = _header_last(p, node, first, body_kids)
+    if hl is None:
+        return None
+    header, broke = tokens_doc(p, node, first, hl)
+    form: Form = (
+        "block"
+        if isinstance(node, chapel.Cobegin)
+        else "bare"
+        if isinstance(node, chapel.Begin | chapel.Sync | chapel.Defer)
+        else "keyword"
+    )
+    return with_attributes(p, node, Body(p, node, hl, form=form).doc(header, broke))
+
+
+@printer(chapel.When)
+def print_when(p: Printer, node: Node) -> Doc | None:
+    """`when 1, 2 do S;`, `when x { }`, `otherwise do S;`."""
+    assert isinstance(node, chapel.When)
+    blk = node.body()
+    first = header_start(p, node)
+    starts = [
+        i
+        for i in [*p.index.own_tokens(node), *p.index.structural_brackets(blk)]
+        if i > first and p.tokens[i].text in ("do", "{")
+    ]
+    if not starts:
+        return None
+    hl = _before(p, min(starts))
+    header, broke = tokens_doc(p, node, first, hl)
+    return with_attributes(p, node, Body(p, node, hl, block=blk).doc(header, broke))
+
+
+@printer(chapel.Select)
+def print_select(p: Printer, node: Node) -> Doc | None:
+    first = header_start(p, node)
+    open_tok = open_brace(p, node)
+    if open_tok is None:
+        return None
+    header, broke = tokens_doc(p, node, first, _before(p, open_tok))
+    whens = body_statements(p, node, open_tok)
+    d = attach_body(p, header, braced(p, node, open_tok, whens), header_ends_line=broke)
+    return with_attributes(p, node, d)
+
+
+def _block_child(p: Printer, node: Node) -> Node | None:
+    return next(
+        (k for k in p.index.children(node) if isinstance(k, chapel.Block)), None
+    )
+
+
+def _after_block(p: Printer, prev: Node, nxt: Node) -> Doc:
+    """What separates `}` of `prev` from `catch` (`else-placement`, `brace-style`)."""
+    if ends_line(p.trivia.trailing(prev)):
+        return EMPTY
+    if (
+        p.options.else_placement == "newline"
+        or p.options.brace_style == "break"
+        or any(c.placement is Placement.OWN_LINE for c in p.trivia.leading(nxt))
+    ):
+        return hardline
+    return text(" ")
+
+
+@printer(chapel.Try)
+def print_try(p: Printer, node: Node) -> Doc | None:
+    """`try { } catch e: E { } catch { }`; `try! f();` and `try! f()` (expression)."""
+    assert isinstance(node, chapel.Try)
+    blk = _block_child(p, node)
+    if blk is None:
+        return print_simple(p, node)
+    first = header_start(p, node)
+    header = text(p.tokens[first].text)
+    d = Body(p, node, first, block=blk, form="block").doc(header)
+    prev: Node = blk
+    for c in node.handlers():
+        d = concat(d, _after_block(p, prev, c), p.print(c))
+        prev = c
+    return with_attributes(p, node, d)
+
+
+@printer(chapel.Catch)
+def print_catch(p: Printer, node: Node) -> Doc | None:
+    """`catch`, `catch e`, `catch e: E`, `catch (e: E)` and a braced body."""
+    assert isinstance(node, chapel.Catch)
+    blk = node.body()
+    first = header_start(p, node)
+    open_tok = open_brace(p, blk)
+    if open_tok is None:
+        return None
+    hl = _before(p, open_tok)
+    header: Doc = text("catch")
+    broke = False
+    if hl > first:
+        rest, broke = tokens_doc(p, node, first + 1, hl)
+        header = concat("catch ", rest)
+    d = Body(p, node, hl, block=blk, form="block").doc(header, broke)
+    return with_attributes(p, node, d)
+
+
+@printer(chapel.WithClause)
+def print_with_clause(p: Printer, node: Node) -> Doc | None:
+    """`with (ref x, + reduce y)`: never the break-after-`(` fallback (section 8.7)."""
+    opens = [i for i in p.index.own_tokens(node) if p.tokens[i].text == "("]
+    if not opens:
+        return None
+    kids = [k for k in p.index.children(node) if p.index.node_span(k) is not None]
+    layouts = bracket_layouts(p, node, opens[0], kids, ListKind.FIXED)
+    lst = layouts.doc() if layouts.aligned is None else layouts.aligned
+    d = p.dangling_comments(node, "header")
+    return concat("with", d, " ", lst)
+
+
+def with_header(p: Printer, before: Doc, clause: Doc) -> Doc:
+    """`before with (...)`; the clause starts its own line (at the current
+    indentation) if `with (` and its first intent don't fit after `before`."""
+    return conditional_group(
+        [concat(before, " ", clause), concat(before, hardline, clause)]
+    )

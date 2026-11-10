@@ -42,8 +42,8 @@ def test_tabs_become_spaces_by_display_width() -> None:
 
 
 def test_crlf_and_trailing_whitespace() -> None:
-    assert fmt("var x;  \r\nproc f() { \t\r\n  g();\r\n}\r\n") == (
-        "var x;\nproc f() {\n  g();\n}\n"
+    assert fmt("var x;  \r\nproc f() { \t\r\n  g();\r\n  h();\r\n}\r\n") == (
+        "var x;\nproc f() {\n  g();\n  h();\n}\n"
     )
 
 
@@ -85,10 +85,10 @@ def test_blank_lines_inside_fallback_collapse() -> None:
 
 
 def test_module_members_fall_back_individually() -> None:
-    src = "module M {\n  select  x { when 1 do f(); }\n}\n"
+    src = "module M {\n  while  x { f(); }\n}\n"
     result = api.format_text(src)
     assert result.text == src
-    assert result.report.fallbacks == ["Select@2:3"]
+    assert result.report.fallbacks == ["While@2:3"]
 
 
 def test_fallback_keeps_attributes() -> None:

@@ -175,6 +175,7 @@ def braced(
     stmts: Sequence[Node] | None = None,
     *,
     anchors: tuple[str, ...] = ("{",),
+    after_open: Sequence[Comment] | None = None,
 ) -> Doc:
     """`{ statements }` of `owner` from its `{` token `open_tok`.
 
@@ -182,13 +183,15 @@ def braced(
     body is `{ }`; comments inside it stay inside (`{ /* c */ }`, or
     `{ // c` / own-line ones on indented lines, then `}`). End-of-line
     comments after `{` stay there. `anchors` selects the owner's dangling
-    comments printed after `{` (all of them with `()`).
+    comments printed after `{` (all of them with `()`), unless `after_open`
+    gives them.
     """
     close = p.tokens[open_tok].match
     assert close is not None
     if stmts is None:
         stmts = body_statements(p, owner, open_tok)
-    after_open = p.dangling(owner, *anchors)
+    if after_open is None:
+        after_open = p.dangling(owner, *anchors)
     empty = p.index.next_code(open_tok) == close and not any(
         open_tok < r.off_token < close for r in p.off.regions
     )

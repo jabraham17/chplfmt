@@ -1,9 +1,5 @@
-proc f(x: int) {
-  return x;
-}
-proc g() {
-  return;
-}
+proc f(x: int) do return x;
+proc g() do return;
 proc h() {
   return firstOperandValue + secondOperandValue + thirdOperandValue +
          fourthValue;
@@ -32,13 +28,9 @@ iter it() {
   yield firstOperandValue + secondOperandValue + thirdOperandValue +
         fourthValue;
 }
-proc t() throws {
-  throw new Error();
-}
+proc t() throws do throw new Error();
 proc u() throws {
   throw new IllegalArgumentError("a fairly long message that " +
                                  "keeps going on");
 }
-proc lt(ref x: R) ref lifetime return x {
-  return x;
-}
+proc lt(ref x: R) ref lifetime return x do return x;

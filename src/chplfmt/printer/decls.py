@@ -9,25 +9,19 @@ from chplfmt.doc import (
     ALL_LINES,
     EMPTY,
     Doc,
-    GroupId,
     align,
     concat,
     conditional_group,
     fill,
     flat_width,
-    group,
     hardline,
-    if_break,
-    indent,
-    line,
     text,
 )
 from chplfmt.doc.ir import Concat
 from chplfmt.offregions import is_statement_list
+from chplfmt.printer.body import Body
 from chplfmt.printer.common import (
     NO_SPACE_BEFORE,
-    attach_body,
-    ends_line,
     header_start,
     semicolon,
     tokens_doc,
@@ -43,7 +37,6 @@ from chplfmt.printer.lists import (
     list_parts,
 )
 from chplfmt.tokens import Node
-from chplfmt.trivia import Placement
 
 _TIGHT_VARARG = frozenset({"..."})
 
@@ -334,11 +327,19 @@ def print_function(p: Printer, node: Node) -> Doc:
     do_tok = next(iter(_own(p, node, "do")), None)
     semi = [i for i in _own(p, node, ";") if do_tok is None or i > do_tok]
     clause_kws = sorted(_own(p, node, ("where", "lifetime")))
-    if do_tok is not None:
-        end_tok, end_width = do_tok, 3
-    elif braced and body_sp is not None:
-        end_tok = body_sp[0]
-        end_width = 2 if p.options.brace_style == "attach" else 0
+    start = do_tok if do_tok is not None else body_sp[0] if body_sp else None
+    b: Body | None = None
+    if body is not None and (braced or do_tok is not None) and start is not None:
+        prev = p.index.prev_code(start)
+        assert prev is not None
+        # Lambdas keep their form: `do` bodies can't end inside an expression.
+        mode = "preserve" if node.is_anonymous() else None
+        b = Body(p, node, prev, block=body, mode=mode)
+        end_tok = start
+        if b.kind == "braces":
+            end_width = 2 if p.options.brace_style == "attach" else 0
+        else:
+            end_width = 3
     elif semi:
         end_tok, end_width = semi[-1], 1
     else:
@@ -351,71 +352,10 @@ def print_function(p: Printer, node: Node) -> Doc:
         c, broke = _clause(p, node, kw, stop)
         clauses.append(c)
     header = _header(p, sig, clauses, end_width)
-    if braced and body is not None and body_sp is not None:
-        # Comments between the header and `{` stay in the header.
-        pre = p.trivia.leading(body) + [
-            c for c in p.dangling(body) if c.token < body_sp[0]
-        ]
-        if pre:
-            header = concat(header, p.comments_after(pre))
-            if ends_line(pre):
-                header, broke = concat(header, hardline), True
-    if braced and body is not None and do_tok is not None:
-        d = concat(header, " do ", p.print(body, leading=False))
-    elif braced and body is not None:
-        d = attach_body(p, header, p.print(body, leading=False), header_ends_line=broke)
-    elif do_tok is not None and body is not None:
-        hid = GroupId("header")
-        d = concat(group(header, hid), " do", _do_body(p, node, body, semi, hid))
+    if b is not None:
+        d = b.doc(header, broke)
     elif semi:
         d = semicolon(p, node, header)
     else:
         d = header
     return with_attributes(p, node, d)
-
-
-def _do_body(p: Printer, fn: Node, body: Node, semi: list[int], header: GroupId) -> Doc:
-    """The statement after `do`: on the same line if it fits, else indented below."""
-    stmts = [k for k in p.index.children(body) if p.index.node_span(k) is not None]
-    with p.nested() as n:
-        lead = p.trivia.leading(stmts[0]) if stmts else []
-        eol = (
-            bool(lead)
-            and lead[0].is_line
-            and lead[0].placement is Placement.END_OF_LINE
-        )
-        own_line = bool(lead) and lead[0].placement is Placement.OWN_LINE
-        last = len(stmts) - 1
-        stmt = concat(
-            *(p.print(s, trailing=k < last) for k, s in enumerate(stmts)),
-            p.dangling_comments(body),
-        )
-        if semi and not any(_covers(p, s, semi[-1]) for s in stmts):
-            stmt = concat(stmt, p.dangling_comments(fn), ";")
-        trail = indent(p.trailing_comments(stmts[-1]), n) if stmts else EMPTY
-        # Comments between `do` and the statement belong to the function.
-        body_sp = p.index.node_span(body)
-        pre = p.trivia.leading(body) + [
-            c for c in p.dangling(fn) if body_sp and c.token < body_sp[0]
-        ]
-        if pre:
-            sep: Doc = (
-                hardline
-                if pre[-1].is_line or pre[-1].placement is Placement.OWN_LINE
-                else text(" ")
-            )
-            stmt = concat(p.comments_after(pre, first_blank=False), sep, stmt)
-            return concat(indent(stmt, n), trail)
-    if eol:
-        return concat(indent(stmt, n), trail)
-    if own_line:
-        return concat(indent(concat(hardline, stmt), n), trail)
-    # A header that breaks puts the body on its own line (section 8.3).
-    brk = if_break(hardline, line, header)
-    return concat(group(indent(concat(brk, stmt), n)), trail)
-
-
-def _covers(p: Printer, stmt: Node, tok: int) -> bool:
-    """Whether printing `stmt` emits token `tok` (e.g. the fallback's `;`)."""
-    sp = p.span(stmt)
-    return sp is not None and sp[0] <= tok <= sp[1]
