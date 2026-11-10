@@ -84,11 +84,18 @@ def test_blank_lines_inside_fallback_collapse() -> None:
     )
 
 
-def test_explicit_module_is_one_fallback() -> None:
+def test_module_members_fall_back_individually() -> None:
     src = "module M {\n  var x;\n}\n"
     result = api.format_text(src)
     assert result.text == src
-    assert result.report.fallbacks == ["Module@1:1"]
+    assert result.report.fallbacks == ["Variable@2:3"]
+
+
+def test_fallback_keeps_attributes() -> None:
+    src = "@chpldoc.nodoc\nvar  x = 1;\n@unstable  proc f() { }\n"
+    result = api.format_text(src)
+    assert result.text == src
+    assert "Function@3:1" in result.report.fallbacks
 
 
 # Top-level statement list

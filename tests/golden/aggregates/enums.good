@@ -1,0 +1,26 @@
+enum Color { red, green, blue }
+enum Trailing { red, green, blue }
+enum Direction {
+  north,
+  east,
+  south,
+  west,
+  northeast,
+  northwest,
+  southeast,
+  southwest,
+  up,
+}
+enum Values { a = 1, b = 2, c }
+enum Commented {
+  // leading
+  a, // after a
+  /* before b */ b,
+
+  c,
+}
+enum Blanks { a, b }
+enum Inline { /* first */ x, y /* last */ }
+enum EOLAfterBrace { // here
+  single,
+}

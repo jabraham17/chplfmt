@@ -1,0 +1,34 @@
+pragma "unsafe"
+@deprecated(since="2.0", notes="use g")
+record R { }
+pragma "no copy"
+pragma "unsafe"
+@unstable("experimental")
+@chpldoc.nodoc
+class C { }
+@unstable
+module M {
+  @chpldoc.nodoc
+  // between attribute and decl
+  record Q { }
+  @deprecated(notes="old")
+  enum E { a, b }
+  enum F {
+    @deprecated
+    a,
+    b,
+  }
+}
+@unstable // eol after attribute
+record S { }
+pragma /* c */ "unsafe" /* d */
+record T { }
+@unstable
+/* doc */
+// more
+class U: Base(?), I { }
+pragma "unsafe" // why
+@unstable
+record V { }
+@chpldoc.nodoc
+proc stillFallsBack() { }

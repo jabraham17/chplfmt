@@ -1,0 +1,13 @@
+module M {
+  record R: I {
+    var x: int;
+  }
+  class C { }
+  enum Small { a, b }
+  enum Big {
+    north, east, south, west, northeast, northwest, southeast, southwest, up, down
+  }
+  {
+    var y = 1;
+  }
+}

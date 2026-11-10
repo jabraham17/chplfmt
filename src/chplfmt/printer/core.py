@@ -250,9 +250,39 @@ class Printer:
             and cs[-1].is_line
             and cs[-1].placement is Placement.OWN_LINE
             and node is not None
-            and not is_statement_list(self.index.parent(node))
+            and not self.is_list_item(node)
         ):
             parts.append(hardline)
+        return concat(*parts)
+
+    def is_list_item(self, node: Node) -> bool:
+        """Whether `node` is a statement of its parent's statement list."""
+        parent = self.index.parent(node)
+        if not is_statement_list(parent):
+            return False
+        if parent is None or (
+            isinstance(parent, chapel.Module) and parent.kind() == "implicit"
+        ):
+            return True
+        opens = [
+            i
+            for i in self.index.structural_brackets(parent)
+            if self.tokens[i].text == "{"
+        ]
+        sp = self.index.node_span(node)
+        return not opens or sp is None or sp[0] > opens[-1]
+
+    def comments_after(self, cs: Sequence[Comment], *, first_blank: bool = True) -> Doc:
+        """Comments `cs` as `trailing_comments` lays them out (no final break).
+
+        With `first_blank=False`, blank lines before the first one are dropped.
+        """
+        parts: list[Doc] = []
+        for k, c in enumerate(cs):
+            if k == 0 and not first_blank and c.placement is Placement.OWN_LINE:
+                parts.append(concat(hardline, self.comment_doc(c.token)))
+                continue
+            parts.append(self._comment_after(c))
         return concat(*parts)
 
     def _comment_after(self, c: Comment) -> Doc:
@@ -271,14 +301,18 @@ class Printer:
         follow after one space. The caller must break the line after the
         result if it may end with a `//` comment (it ends with `break_parent`).
         """
+        return self.comments_after(self.dangling(node, *anchors))
+
+    def dangling(self, node: Key, *anchors: str) -> list[Comment]:
+        """Not-yet-emitted dangling comments of `node` (see `dangling_comments`)."""
         done = set(self.emitted)
-        parts: list[Doc] = []
+        found: list[Comment] = []
         for d in self.trivia.dangling(node):
             kind = "" if d.anchor is None else d.anchor.kind
             if d.comment.token in done or (anchors and kind not in anchors):
                 continue
-            parts.append(self._comment_after(d.comment))
-        return concat(*parts)
+            found.append(d.comment)
+        return found
 
     def check_comments(self) -> None:
         """Raise `InternalError` unless every attached comment was emitted once."""

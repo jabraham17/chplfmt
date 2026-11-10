@@ -74,6 +74,9 @@ def compute_edits(old: str, new: str) -> list[TextEdit]:
     return edits
 
 
+_DIFFLIB_LIMIT = 1_000_000
+
+
 def _matching_blocks(a: list[str], b: list[str]) -> list[tuple[int, int, int]]:
     """Equal runs `(i, j, n)` in order, ending with `(len(a), len(b), 0)`.
 
@@ -100,6 +103,8 @@ def _matching_blocks(a: list[str], b: list[str]) -> list[tuple[int, int, int]]:
             continue
         anchors = _unique_anchors(a, b, alo, ahi, blo, bhi)
         if not anchors:
+            if (ahi - alo) * (bhi - blo) > _DIFFLIB_LIMIT:
+                continue  # quadratic: replace the whole range instead
             matcher = difflib.SequenceMatcher(
                 a=a[alo:ahi], b=b[blo:bhi], autojunk=False
             )

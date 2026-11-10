@@ -275,6 +275,13 @@ class _Attacher:
         k = bisect_left(starts, i)
         preceding = cands[k - 1][2] if k > 0 else None
         following = cands[k][2] if k < len(cands) else None
+        if (
+            isinstance(preceding, chapel.AttributeGroup)
+            and self.index.prev_code(i) == cands[k - 1][1]
+        ):
+            # Between attributes and the declaration: stays after the attributes.
+            self.add(preceding, "trailing", c)
+            return
         if isinstance(preceding, Anchor) and preceding.kind in ("(", "["):
             close = self.tokens[preceding.token].match
             if close is not None and i < close:

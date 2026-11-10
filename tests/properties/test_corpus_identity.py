@@ -1,12 +1,14 @@
-"""Milestone 3 exit criterion: with every printer falling back, the corpus formats to itself."""
+"""Idempotence on the corpus; identity up to whitespace where everything falls back."""
 
 from pathlib import Path
 
 import pytest
 
 from chplfmt import api
+from chplfmt._chapel import chapel
 from chplfmt.config import FormatOptions
-from corpus import corpus_params, parsed
+from chplfmt.printer import REGISTRY
+from corpus import corpus_params, parsed, preorder
 
 pytestmark = pytest.mark.corpus
 
@@ -40,11 +42,25 @@ def normalize(text: str, max_blank_lines: int = 1) -> list[str]:
     return out
 
 
+def _has_printed_kinds(asts: list[chapel.AstNode]) -> bool:
+    """Whether a node has a registered printer (output may then differ from input)."""
+    kinds = tuple(REGISTRY)
+    return any(
+        isinstance(n, kinds)
+        and not (isinstance(n, chapel.Module) and n.kind() == "implicit")
+        for n in preorder(asts)
+    )
+
+
 @pytest.mark.parametrize("path", corpus_params())
-def test_corpus_formats_to_itself(path: Path) -> None:
-    with parsed(path) as (source, _):
+def test_corpus_formats_idempotently(path: Path) -> None:
+    with parsed(path) as (source, result):
         text = source.text
+        printed = _has_printed_kinds(list(result.asts))
     once = api.format_text(text, path=str(path)).text
     assert api.format_text(once, path=str(path)).text == once
     plain = api.format_text(text, path=str(path), options=RULES_OFF).text
-    assert normalize(plain) == normalize(text)
+    assert api.format_text(plain, path=str(path), options=RULES_OFF).text == plain
+    if not printed:
+        # Everything falls back: the output is the input up to whitespace.
+        assert normalize(plain) == normalize(text)
