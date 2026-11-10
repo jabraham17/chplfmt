@@ -6,7 +6,6 @@ import enum
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from chplfmt._chapel import chapel
 from chplfmt.doc import (
     ALL_LINES,
     EMPTY,
@@ -24,7 +23,7 @@ from chplfmt.doc import (
     softline,
     text,
 )
-from chplfmt.printer.core import Printer
+from chplfmt.printer.core import Printer, aligns_in_parens
 from chplfmt.tokens import Node
 from chplfmt.trivia import Placement
 
@@ -232,9 +231,10 @@ def bracket_list(
     return bracket_layouts(p, owner, open_tok, items, kind, spacing=spacing).doc()
 
 
-def aligns_rhs(node: Node) -> bool:
-    """Whether a right-hand side aligns its continuation lines (operator chains, `if`)."""
-    return isinstance(node, chapel.OpCall | chapel.Conditional)
+def aligned_expr(p: Printer, node: Node) -> Doc:
+    """`node` after a keyword or `=`: operator chains and `if` align with their first character."""
+    d = p.print(node)
+    return align(d) if aligns_in_parens(node) else d
 
 
 def assignment(p: Printer, lhs: Doc, op: str, rhs: Node) -> Doc:
@@ -262,7 +262,7 @@ def assignment(p: Printer, lhs: Doc, op: str, rhs: Node) -> Doc:
         return concat(lhs, " ", op, indent(concat(hardline, r), cont))
     return conditional_group(
         [
-            concat(lhs, " ", op, " ", align(r) if aligns_rhs(rhs) else r),
+            concat(lhs, " ", op, " ", align(r) if aligns_in_parens(rhs) else r),
             concat(lhs, " ", op, indent(concat(hardline, r), cont)),
         ],
         FIRST_LINE,

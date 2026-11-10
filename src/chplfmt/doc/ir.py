@@ -104,6 +104,8 @@ class Line:
 @dataclass(frozen=True, slots=True, eq=False)
 class Fill:
     parts: tuple[Doc, ...]
+    # After a content that breaks, the next separator is decided where it ends.
+    lazy: bool = False
     forced: bool = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -241,9 +243,9 @@ literalline = Line(hard=True, literal=True)
 break_parent = BreakParent()
 
 
-def fill(parts: Sequence[DocLike]) -> Fill:
+def fill(parts: Sequence[DocLike], *, lazy: bool = False) -> Fill:
     """Bin-pack alternating content and separators."""
-    return Fill(tuple(_doc(p) for p in parts))
+    return Fill(tuple(_doc(p) for p in parts), lazy)
 
 
 def if_break(

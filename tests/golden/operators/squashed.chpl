@@ -1,0 +1,71 @@
+// Section 8.5
+const total = firstValue * scaleFactor + secondValue * otherScale + thirdValue * lastScale;
+
+const total2 = firstValue * scaleFactor
+  + secondValue * otherScale
+  + thirdValue * lastScale;
+
+const total3 =
+  firstValue*scaleFactor+secondValue*otherScale+
+  thirdValue*lastScale;
+
+// Section 8.9
+const y = if cond
+  then a
+  else b;
+const z = if someLongConditionExpression(withArguments) then firstAlternative else secondAlternative;
+const z2 =
+    if someLongConditionExpression(withArguments) then firstAlternative
+    else secondAlternative;
+
+proc spacing() {
+  var s=a+b;
+  var t=x==y;
+  var u=a**b;
+  x=y;
+  x+=1;
+  a<=>b;
+  var assoc = [1=>"one", 2=>"two"];
+  var r = 1 .. n by 2;
+  var c = 0 .. # n;
+  var w = 1 ..< n;
+  var sum = +reduce A;
+  var mo = a%b/c;
+}
+
+proc unary(x: int ?, ref y: owned C ?) {
+  var a = - x;
+  var b = ! flag;
+  var c = ~ bits;
+  var d = y !;
+  var e = - - x;
+  var f = x : int;
+  var g = ( x + 1 ) : real;
+  var p = a**b**c;
+}
+
+proc chains() {
+  const ok = isValid(idx)
+    && idx < limit
+    && !visited[idx]
+    && idx != sentinelValue
+    && someOtherCondition(idx);
+  var flag: bool;
+  flag = isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue && someOtherCondition(idx);
+  flag &&=
+    isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+    someOtherCondition(idx);
+}
+
+proc parens() {
+  const ok = !(scale == 0 || scale == 1 || scale == 2 || scale == 4 || scale == 8 || scale == 16 || scale == 32);
+  const mixed = (alphaValue + betaValue + gammaValue + deltaValue
+    + epsilonValue) * scaleFactorValue;
+  const sum = (
+    alphaValue + betaValue + gammaValue + deltaValue + epsilonValue + zetaValue
+  );
+}
+
+proc exprIf() {
+  const f = if someLongConditionExpression(withArguments) then firstAlternative else if anotherLongConditionExpression(withArguments) then secondAlternative else thirdAlternative;
+}

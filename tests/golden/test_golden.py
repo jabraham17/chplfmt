@@ -60,6 +60,8 @@ COVERED = frozenset(
         "Reduce",
         "Scan",
         "Let",
+        "OpCall",
+        "Conditional",
     }
 )
 

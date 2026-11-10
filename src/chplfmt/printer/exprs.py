@@ -25,19 +25,22 @@ from chplfmt.printer.core import printer as _register
 from chplfmt.printer.lists import (
     ListItem,
     ListKind,
+    assignment,
     bracket_list,
     list_item,
     list_parts,
 )
 from chplfmt.tokens import Node
+from chplfmt.trivia import Placement
 
 
 def statement(p: Printer, node: Node, d: Doc) -> Doc:
     """`d` with its `;` if `node` is an expression statement."""
-    if not is_statement_list(p.index.parent(node)):
+    parent = p.index.parent(node)
+    if not is_statement_list(parent):
         return d
-    sp, stmt = p.index.node_span(node), p.index.stmt_span(node)
-    if stmt is None or stmt == sp or p.tokens[stmt[1]].text != ";":
+    stmt = p.index.stmt_span(node)
+    if stmt is None or p.tokens[stmt[1]].text != ";" or p.in_expression(parent):
         return d
     return semicolon(p, node, d)
 
@@ -46,8 +49,9 @@ def printer(*classes: type) -> Callable[[PrintFn], PrintFn]:
     """`core.printer` for expressions, which may also be statements."""
 
     def register(fn: PrintFn) -> PrintFn:
-        def wrapped(p: Printer, node: Node) -> Doc:
-            return statement(p, node, fn(p, node))
+        def wrapped(p: Printer, node: Node) -> Doc | None:
+            d = fn(p, node)
+            return None if d is None else statement(p, node, d)
 
         _register(*classes)(wrapped)
         return fn
@@ -170,6 +174,124 @@ def print_range(p: Printer, node: Node) -> Doc:
         p.tokens[op].text,
         EMPTY if hi is None else p.print(hi),
     )
+
+
+ASSIGN_OPS = frozenset(
+    (
+        "=",
+        "+=",
+        "-=",
+        "*=",
+        "/=",
+        "%=",
+        "**=",
+        "&=",
+        "|=",
+        "^=",
+        "<<=",
+        ">>=",
+        "&&=",
+        "||=",
+        "<=>",
+    )
+)
+_TIGHT_OPS = frozenset((":", "#"))
+# Binary operator precedence, lowest first (Chapel spec, "Operator Precedence").
+_PREC = {
+    op: k
+    for k, ops in enumerate(
+        (
+            ("by", "align"),
+            ("||",),
+            ("&&",),
+            ("==", "!="),
+            ("<=", ">=", "<", ">"),
+            ("+", "-"),
+            ("|",),
+            ("^",),
+            ("&",),
+            ("<<", ">>"),
+            ("*", "/", "%"),
+            ("dmapped",),
+            ("**",),
+        )
+    )
+    for op in ops
+}
+_RIGHT_ASSOC = frozenset(("**",))
+
+
+def _flattens(p: Printer, op: str, child: Node, right: bool) -> bool:
+    """Whether `child` continues the chain of `op` (same precedence and associativity)."""
+    return (
+        isinstance(child, chapel.OpCall)
+        and child.is_binary_op()
+        and op in _PREC
+        and _PREC.get(child.op()) == _PREC[op]
+        and right == (op in _RIGHT_ASSOC)
+        and not p.index.parens_around(child)
+        and not p.trivia.leading(child)
+        and not p.trivia.trailing(child)
+    )
+
+
+def _op_token(p: Printer, node: Node, op: str) -> int:
+    return next(i for i in own_code(p, node) if p.tokens[i].text == op)
+
+
+def _chain(p: Printer, node: chapel.OpCall, parts: list[Doc]) -> None:
+    """Append `operand " op"`, separator, ... for the chain rooted at `node`."""
+    op = node.op()
+    lhs, rhs = p.index.children(node)
+    if _flattens(p, op, lhs, False):
+        assert isinstance(lhs, chapel.OpCall)
+        _chain(p, lhs, parts)
+    else:
+        parts.append(p.print(lhs))
+    parts[-1] = concat(parts[-1], " ", op)
+    first = rhs
+    while _flattens(p, op, first, True):
+        first = p.index.children(first)[0]
+    own_line = any(c.placement is Placement.OWN_LINE for c in p.trivia.leading(first))
+    parts.append(hardline if own_line else line)
+    if _flattens(p, op, rhs, True):
+        assert isinstance(rhs, chapel.OpCall)
+        _chain(p, rhs, parts)
+    else:
+        parts.append(p.print(rhs))
+
+
+@printer(chapel.OpCall)
+def print_op_call(p: Printer, node: Node) -> Doc | None:
+    assert isinstance(node, chapel.OpCall)
+    op = node.op()
+    kids = p.index.children(node)
+    parens = {i for k in kids for layer in p.index.parens_around(k) for i in layer}
+    own = [p.tokens[i].text for i in own_code(p, node) if i not in parens]
+    if own[-1:] == [";"] and len(own) > 1:
+        own.pop()
+    if op == "..." and own == ["(", "...", ")"] and len(kids) == 1:
+        return concat("(...", p.print(kids[0]), ")")
+    if own != [op.removeprefix("postfix")]:
+        return None
+    if node.is_unary_op() and len(kids) == 1:
+        operand = p.print(kids[0])
+        if op.startswith("postfix"):
+            return concat(operand, op.removeprefix("postfix"))
+        if op == "?":
+            return concat(operand, op)
+        nxt = p.index.next_code(_op_token(p, node, op))
+        sep = " " if op in "+-" and p.tokens[nxt].text[0] in "+-" else ""
+        return concat(op, sep, operand)
+    if not node.is_binary_op() or len(kids) != 2:
+        return None
+    if op in ASSIGN_OPS:
+        return assignment(p, p.print(kids[0]), op, kids[1])
+    if op in _TIGHT_OPS:
+        return concat(p.print(kids[0]), op, p.print(kids[1]))
+    parts: list[Doc] = []
+    _chain(p, node, parts)
+    return fill(parts, lazy=True)
 
 
 @printer(chapel.Reduce, chapel.Scan)

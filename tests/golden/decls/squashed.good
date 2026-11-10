@@ -33,3 +33,14 @@ record R {
     // ...
   }
 }
+
+proc open(stream, format)
+where (isOwnedClass(stream) || isSharedClass(stream) ||
+       isUnmanagedClass(stream)) && isValidFormat(format) {
+  // ...
+}
+
+proc numBits(type t) param: int
+where t == vec32x8r || t == vec64x4r || t == vec8x32i || t == vec16x16i ||
+      t == vec32x8i || t == vec64x4i do
+  return 256;

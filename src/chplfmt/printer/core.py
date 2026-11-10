@@ -20,6 +20,7 @@ from chplfmt.config import FormatOptions
 from chplfmt.doc import (
     EMPTY,
     Doc,
+    align,
     break_parent,
     column_text,
     concat,
@@ -44,9 +45,15 @@ from chplfmt.trivia import Attachment, Comment, Key, Placement, attach
 
 log = logging.getLogger("chplfmt.printer")
 
-type PrintFn = Callable[[Printer, Node], Doc]
+# A printer returns None to fall back for this node.
+type PrintFn = Callable[[Printer, Node], Doc | None]
 
 REGISTRY: dict[type, PrintFn] = {}
+
+
+def aligns_in_parens(node: Node) -> bool:
+    """Whether `node` aligns its continuation lines (operator chains, `if`; section 7.7)."""
+    return isinstance(node, chapel.OpCall | chapel.Conditional)
 
 
 def printer(*classes: type) -> Callable[[PrintFn], PrintFn]:
@@ -183,10 +190,11 @@ class Printer:
             d: Doc = verbatim(self._original(sp))
         else:
             fn = self.lookup(type(node))
-            if fn is None:
+            r = None if fn is None else fn(self, node)
+            if r is None:
                 d = self.fallback(node, col=col)
             else:
-                d = fn(self, node)
+                d = r
                 self.end_col = None
             d = self.wrap_user_parens(node, d)
         return concat(lead, d, self.trailing_comments(node) if trailing else EMPTY)
@@ -196,7 +204,7 @@ class Printer:
         layers = self.index.parens_around(node)
         for depth, layer in enumerate(layers):
             if self.keep_parens(node, layer, depth):
-                d = concat("(", d, ")")
+                d = concat("(", align(d) if aligns_in_parens(node) else d, ")")
                 self.end_col = None
         return d
 
@@ -348,9 +356,16 @@ class Printer:
 
     def span(self, node: Node) -> Span | None:
         """The node's tokens, with the terminating `;` for statements in a list."""
-        if is_statement_list(self.index.parent(node)):
+        parent = self.index.parent(node)
+        if is_statement_list(parent) and not self.in_expression(parent):
             return self.index.stmt_span(node)
         return self.index.node_span(node)
+
+    def in_expression(self, block: Node | None) -> bool:
+        """Whether `block` is a branch or body of an expression-level `if`/loop/`try`."""
+        owner = None if block is None else self.index.parent(block)
+        is_expr = getattr(owner, "is_expression_level", None)
+        return is_expr is not None and bool(is_expr())
 
     # Fallback
 

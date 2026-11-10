@@ -85,10 +85,10 @@ def test_blank_lines_inside_fallback_collapse() -> None:
 
 
 def test_module_members_fall_back_individually() -> None:
-    src = "module M {\n  x  = 1;\n}\n"
+    src = "module M {\n  select  x { when 1 do f(); }\n}\n"
     result = api.format_text(src)
     assert result.text == src
-    assert result.report.fallbacks == ["OpCall@2:3"]
+    assert result.report.fallbacks == ["Select@2:3"]
 
 
 def test_fallback_keeps_attributes() -> None:

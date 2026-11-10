@@ -363,6 +363,21 @@ def test_fill_measures_last_item_with_following_text() -> None:
     assert proc(24) == "f(a, b,\n  c): real throws {\n  body;\n}"
 
 
+def test_lazy_fill_decides_separator_after_broken_content() -> None:
+    def doc(lazy: bool) -> DocLike:
+        broken = group(concat("aaaaaa", softline, "b"))
+        return fill([broken, line, "cc", line, "dd"], lazy=lazy)
+
+    assert r(doc(False), 5) == "aaaaaa\nb\ncc dd"
+    assert r(doc(True), 5) == "aaaaaa\nb cc\ndd"
+
+
+def test_lazy_fill_bin_packs_like_fill() -> None:
+    parts: list[DocLike] = ["aa", line, "bb", line, "cc", line, "dd"]
+    for width in (1, 5, 8):
+        assert r(fill(parts, lazy=True), width) == r(fill(parts), width)
+
+
 # conditional_group
 
 

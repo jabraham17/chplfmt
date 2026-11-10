@@ -57,6 +57,8 @@ class RenderResult:
 class _FillAt:
     fill: Fill
     start: int
+    # `start` is a separator still to be decided (lazy fills).
+    at_sep: bool = False
 
 
 type _Node = Doc | _FillAt
@@ -234,7 +236,10 @@ class _Printer:
             elif isinstance(d, Fill):
                 self._fill(d, 0, ind, mode, cmds)
             elif isinstance(d, _FillAt):
-                self._fill(d.fill, d.start, ind, mode, cmds)
+                if d.at_sep:
+                    self._fill_sep(d.fill, d.start, ind, mode, cmds)
+                else:
+                    self._fill(d.fill, d.start, ind, mode, cmds)
             elif isinstance(d, IfBreak):
                 gid = d.group_id
                 gm = mode if gid is None else self.group_modes.get(gid, FLAT)
@@ -293,7 +298,7 @@ class _Printer:
         content = parts[i]
         # The last content is measured with what follows it, up to the next break.
         rests: _Rests = (cmds, *self.rests)
-        content_fits = self._fits(
+        content_fits = not (f.lazy and content.forced) and self._fits(
             [(ind, FLAT, content)], rests if n == 1 else (), self.pos, True
         )
         if n == 1:
@@ -304,6 +309,10 @@ class _Printer:
             cmds.append((ind, not content_fits, ws))
             cmds.append((ind, not content_fits, content))
             return
+        if f.lazy and not content_fits:
+            cmds.append((ind, mode, _FillAt(f, i + 1, at_sep=True)))
+            cmds.append((ind, BREAK, content))
+            return
         pair_fits = content_fits and self._fits(
             [(ind, FLAT, parts[i + 2]), (ind, FLAT, ws), (ind, FLAT, content)],
             rests if n == 3 else (),
@@ -313,6 +322,22 @@ class _Printer:
         cmds.append((ind, mode, _FillAt(f, i + 2)))
         cmds.append((ind, not pair_fits, ws))
         cmds.append((ind, not content_fits, content))
+
+    def _fill_sep(
+        self, f: Fill, i: int, ind: int, mode: bool, cmds: list[_Cmd]
+    ) -> None:
+        """Separator `i` of a lazy fill, measured from where the content before it ended."""
+        parts = f.parts
+        ws, nxt = parts[i], parts[i + 1]
+        rests: _Rests = (cmds, *self.rests)
+        fits = not self.suffixes and self._fits(
+            [(ind, FLAT, nxt), (ind, FLAT, ws)],
+            rests if i + 2 == len(parts) else (),
+            self.pos,
+            True,
+        )
+        cmds.append((ind, mode, _FillAt(f, i + 1)))
+        cmds.append((ind, not fits, ws))
 
     def _select(self, d: ConditionalGroup, ind: int, cmds: list[_Cmd]) -> _Cmd:
         alts = d.alts
