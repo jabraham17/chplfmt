@@ -3,7 +3,14 @@ from pathlib import Path
 import pytest
 
 from chplfmt.lexer import TokenKind, check_invariants, tokenize
-from corpus import LEAF_TYPES, corpus_params, extern_ranges, parsed, preorder
+from corpus import (
+    LEAF_TYPES,
+    corpus_params,
+    extern_ranges,
+    parsed,
+    preorder,
+)
+from reference.lexer import tokenize as reference_tokenize
 
 pytestmark = pytest.mark.corpus
 
@@ -24,3 +31,38 @@ def test_lexer_on_corpus(path: Path) -> None:
             if start not in starts or end not in ends:
                 bad.append(f"{type(node).__name__} {start}-{end}")
         assert bad == []
+
+
+@pytest.mark.parametrize("path", corpus_params())
+def test_native_lexer_matches_reference(path: Path) -> None:
+    with parsed(path) as (source, result):
+        ranges = extern_ranges(source, result.asts)
+        native = tokenize(source, ranges)
+        reference = reference_tokenize(source, ranges)
+        assert [
+            (
+                str(t.kind),
+                t.text,
+                t.start_offset,
+                t.end_offset,
+                t.start,
+                t.end,
+                t.nl_before,
+                t.ws_before,
+                t.match,
+            )
+            for t in native
+        ] == [
+            (
+                str(t.kind),
+                t.text,
+                t.start_offset,
+                t.end_offset,
+                t.start,
+                t.end,
+                t.nl_before,
+                t.ws_before,
+                t.match,
+            )
+            for t in reference
+        ]

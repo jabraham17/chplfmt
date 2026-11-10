@@ -11,6 +11,7 @@ from chplfmt.lexer import (
     tokenize,
 )
 from chplfmt.source import SourceText
+from reference.lexer import tokenize as reference_tokenize
 
 K = TokenKind
 
@@ -439,3 +440,104 @@ def test_format_tokens() -> None:
         "4 LINE_COMMENT 2:3-2:7 nl=1 '// c'\n"
         "5 EOF 3:1-3:1 nl=1 ''\n"
     )
+
+
+def test_native_kind_identity_and_frozen_tokens() -> None:
+    tokens = lex('name 1 "x" // hi\n/* block */ +')
+    tokens += lex("opaque", [(0, 6)])[:1]
+    for token in tokens:
+        assert token.kind is getattr(K, str(token.kind))
+    assert {token.kind for token in tokens} == set(
+        K.__dict__[name]
+        for name in (
+            "IDENT",
+            "NUMBER",
+            "STRING",
+            "LINE_COMMENT",
+            "BLOCK_COMMENT",
+            "PUNCT",
+            "OPAQUE",
+            "EOF",
+        )
+    )
+    assert tokens[0] == lex("name")[0]
+    assert hash(tokens[0]) == hash(lex("name")[0])
+    field = "text"
+    with pytest.raises(AttributeError):
+        setattr(tokens[0], field, "changed")
+
+
+@pytest.mark.parametrize(
+    ("text", "opaque"),
+    [
+        ("", []),
+        (" \t\r\n\f", []),
+        ("try! init= reduce= ?t @attr", []),
+        ("1..5 1.e3 1.exp .5e2 0x1.p3 0x.8p-1 0b12 0x", []),
+        ('b"x\\\ny" """a\nb"""', []),
+        ("// c\r\n/* a /* b */ c */\n/*/ x */", []),
+        ('"é中"\n/* 😀 */ (x[1])', []),
+        ('extern { "}" }\n(x)', [(0, 14)]),
+        ('"a"\n  b', [(0, 3), (6, 7)]),
+        ("a<=>b..<c...d x++ --y", []),
+    ],
+)
+def test_native_matches_reference(text: str, opaque: list[tuple[int, int]]) -> None:
+    source = SourceText.from_text(text)
+    expected = reference_tokenize(source, opaque)
+    actual = tokenize(source, opaque)
+    assert [
+        (
+            str(t.kind),
+            t.text,
+            t.start_offset,
+            t.end_offset,
+            t.start,
+            t.end,
+            t.nl_before,
+            t.ws_before,
+            t.match,
+        )
+        for t in actual
+    ] == [
+        (
+            str(t.kind),
+            t.text,
+            t.start_offset,
+            t.end_offset,
+            t.start,
+            t.end,
+            t.nl_before,
+            t.ws_before,
+            t.match,
+        )
+        for t in expected
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "opaque"),
+    [
+        ("var é", []),
+        ("x$y", []),
+        ("'abc", []),
+        ('b"abc', []),
+        ("/* a /* b */", []),
+        ("f(]", []),
+        ("{\n(", []),
+        ("abc", [(1, 3)]),
+        ("a bc", [(1, 3)]),
+        ("abc", [(4, 6)]),
+    ],
+)
+def test_native_errors_match_reference(
+    text: str, opaque: list[tuple[int, int]]
+) -> None:
+    source = SourceText.from_text(text)
+    with pytest.raises(LexError) as expected:
+        reference_tokenize(source, opaque)
+    with pytest.raises(LexError) as actual:
+        tokenize(source, opaque)
+    assert str(actual.value) == str(expected.value)
+    assert actual.value.offset == expected.value.offset
+    assert actual.value.pos == expected.value.pos

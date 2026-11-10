@@ -1,5 +1,256 @@
-use pyo3::exceptions::{PyValueError, PyZeroDivisionError};
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
+use chplfmt_core::lexer::scan::{self, LexErrorKind};
+use chplfmt_core::lexer::token::{Token as CoreToken, TokenKind as CoreKind, NO_MATCH};
+use pyo3::class::basic::CompareOp;
+use pyo3::create_exception;
+use pyo3::exceptions::{PyException, PyValueError, PyZeroDivisionError};
 use pyo3::prelude::*;
+use pyo3::sync::GILOnceCell;
+use pyo3::types::PyString;
+
+create_exception!(chplfmt._native, NativeLexError, PyException);
+
+const KIND_NAMES: [&str; 8] = [
+    "IDENT",
+    "NUMBER",
+    "STRING",
+    "LINE_COMMENT",
+    "BLOCK_COMMENT",
+    "PUNCT",
+    "OPAQUE",
+    "EOF",
+];
+
+#[pyclass(frozen, name = "TokenKind")]
+struct PyTokenKind {
+    value: CoreKind,
+}
+
+static KINDS: GILOnceCell<[Py<PyTokenKind>; 8]> = GILOnceCell::new();
+
+fn kinds(py: Python<'_>) -> &[Py<PyTokenKind>; 8] {
+    KINDS.get_or_init(py, || {
+        std::array::from_fn(|index| {
+            let value = match index {
+                0 => CoreKind::Ident,
+                1 => CoreKind::Number,
+                2 => CoreKind::String,
+                3 => CoreKind::LineComment,
+                4 => CoreKind::BlockComment,
+                5 => CoreKind::Punct,
+                6 => CoreKind::Opaque,
+                _ => CoreKind::Eof,
+            };
+            Py::new(py, PyTokenKind { value }).unwrap()
+        })
+    })
+}
+
+#[pymethods]
+#[allow(non_snake_case)]
+impl PyTokenKind {
+    #[classattr]
+    fn IDENT(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[0].clone_ref(py)
+    }
+    #[classattr]
+    fn NUMBER(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[1].clone_ref(py)
+    }
+    #[classattr]
+    fn STRING(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[2].clone_ref(py)
+    }
+    #[classattr]
+    fn LINE_COMMENT(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[3].clone_ref(py)
+    }
+    #[classattr]
+    fn BLOCK_COMMENT(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[4].clone_ref(py)
+    }
+    #[classattr]
+    fn PUNCT(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[5].clone_ref(py)
+    }
+    #[classattr]
+    fn OPAQUE(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[6].clone_ref(py)
+    }
+    #[classattr]
+    fn EOF(py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[7].clone_ref(py)
+    }
+
+    fn __str__(&self) -> &'static str {
+        KIND_NAMES[self.value as usize]
+    }
+    fn __format__(&self, spec: &str) -> PyResult<String> {
+        if spec.is_empty() {
+            Ok(self.__str__().to_owned())
+        } else {
+            Err(PyValueError::new_err(
+                "unsupported format string for TokenKind",
+            ))
+        }
+    }
+    fn __repr__(&self) -> String {
+        format!("<TokenKind.{}: '{}'>", self.__str__(), self.__str__())
+    }
+    fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> PyResult<bool> {
+        let equal = if let Ok(other) = other.extract::<PyRef<'_, PyTokenKind>>() {
+            self.value == other.value
+        } else if let Ok(other) = other.extract::<&str>() {
+            self.__str__() == other
+        } else {
+            false
+        };
+        Ok(match op {
+            CompareOp::Eq => equal,
+            CompareOp::Ne => !equal,
+            _ => false,
+        })
+    }
+    fn __hash__(&self, py: Python<'_>) -> PyResult<isize> {
+        PyString::new(py, self.__str__()).hash()
+    }
+}
+
+#[pyclass(frozen, name = "Token")]
+struct PyToken {
+    value: CoreToken,
+    text: Py<PyString>,
+}
+
+#[pymethods]
+impl PyToken {
+    #[getter]
+    fn kind(&self, py: Python<'_>) -> Py<PyTokenKind> {
+        kinds(py)[self.value.kind as usize].clone_ref(py)
+    }
+    #[getter]
+    fn text(&self, py: Python<'_>) -> Py<PyString> {
+        self.text.clone_ref(py)
+    }
+    #[getter]
+    fn start_offset(&self) -> u32 {
+        self.value.start_cp
+    }
+    #[getter]
+    fn end_offset(&self) -> u32 {
+        self.value.end_cp
+    }
+    #[getter]
+    fn start(&self) -> (u32, u32) {
+        (self.value.start.line, self.value.start.col)
+    }
+    #[getter]
+    fn end(&self) -> (u32, u32) {
+        (self.value.end.line, self.value.end.col)
+    }
+    #[getter]
+    fn nl_before(&self) -> u32 {
+        self.value.nl_before
+    }
+    #[getter]
+    fn ws_before(&self) -> bool {
+        self.value.ws_before
+    }
+    #[getter]
+    fn r#match(&self) -> Option<u32> {
+        (self.value.partner != NO_MATCH).then_some(self.value.partner)
+    }
+    #[getter]
+    fn is_comment(&self) -> bool {
+        matches!(
+            self.value.kind,
+            CoreKind::LineComment | CoreKind::BlockComment
+        )
+    }
+    fn __richcmp__(
+        &self,
+        other: &Bound<'_, PyAny>,
+        op: CompareOp,
+        py: Python<'_>,
+    ) -> PyResult<bool> {
+        let equal = if let Ok(other) = other.extract::<PyRef<'_, PyToken>>() {
+            self.value == other.value
+                && self.text.bind(py).to_str()? == other.text.bind(py).to_str()?
+        } else {
+            false
+        };
+        Ok(match op {
+            CompareOp::Eq => equal,
+            CompareOp::Ne => !equal,
+            _ => false,
+        })
+    }
+    fn __hash__(&self, py: Python<'_>) -> PyResult<u64> {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (self.value.kind as u8).hash(&mut hasher);
+        self.text.bind(py).to_str()?.hash(&mut hasher);
+        self.value.start_cp.hash(&mut hasher);
+        self.value.end_cp.hash(&mut hasher);
+        self.value.start.hash(&mut hasher);
+        self.value.end.hash(&mut hasher);
+        self.value.nl_before.hash(&mut hasher);
+        self.value.ws_before.hash(&mut hasher);
+        self.value.partner.hash(&mut hasher);
+        Ok(hasher.finish())
+    }
+}
+
+#[pyfunction]
+fn lex(py: Python<'_>, text: &str, opaque: Vec<(usize, usize)>) -> PyResult<Vec<Py<PyToken>>> {
+    let tokens = scan::lex(text, &opaque)
+        .map_err(|error| {
+            if error.reason == LexErrorKind::TooLarge {
+                return Ok(PyValueError::new_err("source is at least 4 GiB"));
+            }
+            let (reason, ch) = match error.reason {
+                LexErrorKind::TooLarge => unreachable!(),
+                LexErrorKind::UnterminatedString => ("unterminated string literal", None),
+                LexErrorKind::UnterminatedBlockComment => ("unterminated block comment", None),
+                LexErrorKind::InvalidCharacter(ch) => ("invalid character", Some(ch.to_string())),
+                LexErrorKind::OpaqueWhitespace => ("opaque range starts inside whitespace", None),
+                LexErrorKind::OpaqueToken => ("opaque range starts inside a token", None),
+                LexErrorKind::OpaqueOutside => ("opaque range outside the text", None),
+                LexErrorKind::Unmatched(ch) => ("unmatched", Some(ch.to_string())),
+            };
+            let err = NativeLexError::new_err(reason);
+            err.value(py).setattr("offset", error.offset_cp)?;
+            err.value(py).setattr("reason", reason)?;
+            err.value(py).setattr("char", ch)?;
+            Ok::<PyErr, PyErr>(err)
+        })
+        .map_err(|result| result.unwrap())?;
+    let mut interned: HashMap<&str, Py<PyString>> = HashMap::new();
+    tokens
+        .toks
+        .iter()
+        .enumerate()
+        .map(|(index, token)| {
+            let value = tokens.text(index);
+            let text = if value.len() <= 16 {
+                interned
+                    .entry(value)
+                    .or_insert_with(|| PyString::new(py, value).unbind())
+                    .clone_ref(py)
+            } else {
+                PyString::new(py, value).unbind()
+            };
+            Py::new(
+                py,
+                PyToken {
+                    value: *token,
+                    text,
+                },
+            )
+        })
+        .collect()
+}
 
 #[pyfunction]
 fn char_width(ch: &str) -> PyResult<i64> {
@@ -20,6 +271,10 @@ fn display_width(text: &str, start_col: i64, tab_size: i64) -> PyResult<i64> {
 
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<PyTokenKind>()?;
+    module.add_class::<PyToken>()?;
+    module.add("NativeLexError", module.py().get_type::<NativeLexError>())?;
+    module.add_function(wrap_pyfunction!(lex, module)?)?;
     module.add_function(wrap_pyfunction!(char_width, module)?)?;
     module.add_function(wrap_pyfunction!(display_width, module)?)?;
     Ok(())
