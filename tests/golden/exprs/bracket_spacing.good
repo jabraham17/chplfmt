@@ -1,0 +1,12 @@
+var l = { 1..n, 1..m };
+var m = [ 1, 2, 3 ];
+var o = [ 1, 2; 3, 4 ];
+var p = ( a, b );
+var q = ( a, );
+var n2 = [ 1 => "a" ];
+var c = f(a, b)[i, j];
+var t: ( int, real );
+var messages = [ "the first message in the list", "the second message",
+                 "a third" ];
+var long = [ alphaValueNumberOne, betaValueNumberTwo, gammaValueNumberThree,
+             delta ];

@@ -228,7 +228,7 @@ def test_off_region_first_and_last_in_file() -> None:
 def test_nested_off_region_is_byte_identical() -> None:
     region = "  // chplfmt: off\n    var  x\t=  1;  \n  // chplfmt: on\n"
     src = "proc f() {\n" + region + "  g( );\n}\n"
-    assert fmt(src) == "proc f() {\n" + region + "  g( );\n}\n"
+    assert fmt(src) == "proc f() {\n" + region + "  g();\n}\n"
 
 
 def test_off_region_first_after_brace_gets_no_blank_line() -> None:

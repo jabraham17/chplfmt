@@ -1,0 +1,28 @@
+var x = foo(alpha, beta, gamma);
+var y = someFunction(firstValue, secondValue, thirdValue, fourthValue,
+                     fifthValue);
+var z = aVeryLongFunctionNameThatPushesTheOpenBracketVeryFarRight(
+  firstArgumentValue, secondArgumentValue
+);
+const messages = [
+  "the first message in the list", "the second message",
+  "a third message that is quite a bit longer than all the others",
+];
+
+// Squashed variants produce the same output.
+var x = foo(alpha,beta,gamma);
+var y = someFunction(firstValue,secondValue,thirdValue,fourthValue,fifthValue);
+var z = aVeryLongFunctionNameThatPushesTheOpenBracketVeryFarRight(firstArgumentValue,secondArgumentValue);
+const messages = ["the first message in the list","the second message","a third message that is quite a bit longer than all the others"];
+var y = someFunction(
+          firstValue,
+          secondValue, thirdValue,
+  fourthValue, fifthValue
+);
+
+// Nested calls that wrap.
+var nested = outerFunction(innerFunction(alpha, beta, gamma), otherInner(delta),
+                           epsilon);
+var deep = outerFunction(innerFunctionWithALongName(alphaArgument, betaArgument,
+                                                    gammaArgument, deltaArg));
+writeln(formatValue(computeSomething(firstArgument, secondArgument), width=10, precision=3));
