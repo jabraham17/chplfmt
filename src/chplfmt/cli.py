@@ -291,6 +291,16 @@ def _print_version() -> int:
     return EXIT_OK
 
 
+def _run_lsp() -> int:
+    try:
+        importlib.import_module("chplfmt._chapel")
+    except ImportError as e:
+        return _usage_error(str(e))
+    from chplfmt import lsp
+
+    return lsp.main()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     cwd = os.getcwd()
@@ -300,6 +310,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         run = RunOptions.from_args(args)
         lines = parse_lines(args.lines) if args.lines is not None else None
     except ConfigError as e:
+        if "--lsp" in argv:  # the server reports config errors per request
+            return _run_lsp()
         return _usage_error(str(e))
 
     if args.list_options:
@@ -311,7 +323,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.version:
         return _print_version()
     if args.lsp:
-        return _usage_error("--lsp is not implemented yet")
+        return _run_lsp()
 
     try:
         if args.in_place and (args.check or args.diff):

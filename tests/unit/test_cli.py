@@ -326,10 +326,6 @@ def test_version(capsys: Any) -> None:
     assert out[1].startswith("Chapel 2.")
 
 
-def test_lsp_not_implemented(capsys: Any) -> None:
-    assert main(["--lsp"]) == 2
-
-
 def test_unified_diff_without_final_newline() -> None:
     assert unified_diff("a\nb", "a\nc", "f.chpl").endswith(
         "-b\n\\ No newline at end of file\n+c\n\\ No newline at end of file\n"
