@@ -263,6 +263,11 @@ def parse_errors(text: str) -> list[str]:
         return [d.message for d in res.errors]
 
 
+def test_pragmas_must_precede_attributes() -> None:
+    assert parse_errors('pragma "always RVF"\n@deprecated\nproc f() { }\n') == []
+    assert parse_errors('@deprecated\npragma "always RVF"\nproc f() { }\n')
+
+
 TRAILING_COMMA_LEGAL = {
     "array": "var a = [1, 2,];",
     "associative": "var a = [1 => 2, 3 => 4,];",

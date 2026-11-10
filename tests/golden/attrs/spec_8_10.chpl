@@ -1,0 +1,2 @@
+pragma   "always RVF"   @deprecated( since="2.0",notes="use g" )
+proc f() {}
