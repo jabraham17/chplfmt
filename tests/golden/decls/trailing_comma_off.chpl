@@ -1,0 +1,4 @@
+var (aVeryVeryLongTupleComponentNameThatCannotPossiblyFitAlignedAfterTheOpenParen, b) = t;
+var (aVeryVeryLongTupleComponentNameThatCannotPossiblyFitAlignedAfterTheOpenParen, b,) = t;
+var (a, b,) = t;
+var (e,) = t;

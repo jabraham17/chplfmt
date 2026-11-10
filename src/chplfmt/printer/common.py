@@ -15,6 +15,11 @@ HEADER_ANCHORS = ("", "header", "(", "[", "then", "else")
 
 NO_SPACE_BEFORE = frozenset({",", ")", "]", ":", ";", ".", "(", "["})
 NO_SPACE_AFTER = frozenset({"(", "[", "."})
+# Tokens after which an open bracket is spaced (`x: [D] int`, `= (1, 2)`).
+SPACE_BEFORE_OPEN = frozenset(
+    {":", "=", ",", "where", "lifetime", "return", "proc", "iter", "operator", "ref"}
+    | {"const", "param", "type"}
+)
 
 
 def ends_line(cs: Sequence[Comment]) -> bool:
@@ -75,9 +80,14 @@ def tokens_doc(
     break (so the next text must not follow on the same line).
     """
     tokens = p.tokens
+    # `p.print` re-adds a child's user parentheses, which `node` owns.
+    outer: dict[Node, tuple[int, int]] = {}
+    for o, c, k in p.index.user_parens(node):
+        if first <= o and c <= last and (k not in outer or o < outer[k][0]):
+            outer[k] = (o, c)
     kids: dict[int, tuple[Node, int]] = {}
     for k in p.index.children(node):
-        sp = p.index.node_span(k)
+        sp = outer.get(k) or p.index.node_span(k)
         if sp is not None and first <= sp[0] <= last:
             kids[sp[0]] = (k, sp[1])
     dangling = {c.token: c for c in p.dangling(node, *anchors)}
@@ -111,6 +121,8 @@ def tokens_doc(
             and not broke
             and (
                 prev == " "
+                or (head in ("(", "[") and prev in SPACE_BEFORE_OPEN)
+                or (head == ":" and prev == "operator")
                 or not (
                     head in NO_SPACE_BEFORE
                     or prev in NO_SPACE_AFTER

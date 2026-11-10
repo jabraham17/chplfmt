@@ -1,0 +1,18 @@
+proc f(x: int): int {
+  return x;
+}
+proc empty() { }
+proc toHex(tup, param filled = false) where isTuple(tup) {
+  // ...
+}
+proc compute(const ref A: [?D] real, ref B: [D] real, alpha: real,
+             beta: real): real throws
+where D.rank == 2 {
+  // ...
+}
+proc aVeryLongProcedureNameForDemonstratingTheFallbackLayout(
+  param benchmark: Benchmark, img: [] uint(32), ref res: [] uint(8)
+) where benchmark == Benchmark.ScalarFloat {
+  // ...
+}
+proc double(x: int) do return 2 * x;

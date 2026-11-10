@@ -171,6 +171,12 @@ class SuffixBreak:
     forced: ClassVar[bool] = False
 
 
+@dataclass(frozen=True, slots=True, eq=False)
+class OnRender:
+    fn: Callable[[], None]
+    forced: ClassVar[bool] = False
+
+
 type Doc = (
     Text
     | Concat
@@ -187,6 +193,7 @@ type Doc = (
     | Verbatim
     | ColumnText
     | SuffixBreak
+    | OnRender
 )
 type DocLike = Doc | str
 
@@ -289,6 +296,11 @@ suffix_break = SuffixBreak()
 """A newline (at the current indentation) only if a `line_suffix` is pending."""
 
 
+def on_render(fn: Callable[[], None]) -> OnRender:
+    """Zero-width; calls `fn` when the final layout prints it (not when measuring)."""
+    return OnRender(fn)
+
+
 def dump(doc: DocLike) -> str:
     """Readable indented tree of `doc`, for tests and debugging."""
     out: list[str] = []
@@ -311,6 +323,8 @@ def _dump(d: Doc, depth: int, out: list[str]) -> None:
             out.append(f"{pad}column_text {make(0)!r}")
         case SuffixBreak():
             out.append(f"{pad}suffix_break")
+        case OnRender():
+            out.append(f"{pad}on_render")
         case TrailingComment(s):
             out.append(f"{pad}trailing_comment {s!r}")
         case BreakParent():

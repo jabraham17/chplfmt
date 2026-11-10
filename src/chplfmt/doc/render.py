@@ -23,6 +23,7 @@ from chplfmt.doc.ir import (
     Indent,
     Line,
     LineSuffix,
+    OnRender,
     SuffixBreak,
     Text,
     TrailingComment,
@@ -74,6 +75,23 @@ def render(doc: DocLike, options: FormatOptions, base_indent: int = 0) -> Render
     lines = p.records
     out = align_trailing_comments(lines, options.line_length, options.tab_size)
     return RenderResult("\n".join(out), lines)
+
+
+def flat_width(doc: DocLike, options: FormatOptions) -> int | None:
+    """Display width of `doc` printed flat, or None if it must break."""
+    root = concat(doc)
+    if root.forced:
+        return None
+    p = _Printer(
+        FormatOptions(tab_size=options.tab_size, line_length=0),
+        {},
+        {},
+        (),
+        measure=True,
+        pos=0,
+    )
+    p.run([(0, FLAT, root)])
+    return p.pos
 
 
 def align_trailing_comments(
@@ -263,6 +281,8 @@ class _Printer:
                     self.pos = display_width(seg, self.pos, tab)
             elif isinstance(d, SuffixBreak) and self.suffixes:
                 cmds.append((ind, mode, hardline))
+            elif isinstance(d, OnRender) and not measure:
+                d.fn()
             # BreakParent prints nothing.
 
     def _fill(self, f: Fill, i: int, ind: int, mode: bool, cmds: list[_Cmd]) -> None:

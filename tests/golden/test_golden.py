@@ -29,6 +29,15 @@ COVERED = frozenset(
         "Block",
         "AttributeGroup",
         "Attribute",
+        "Variable",
+        "MultiDecl",
+        "TupleDecl",
+        "ForwardingDecl",
+        "Formal",
+        "AnonFormal",
+        "VarArgFormal",
+        "Function",
+        "FunctionSignature",
     }
 )
 

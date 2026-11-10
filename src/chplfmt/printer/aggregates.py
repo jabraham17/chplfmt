@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 from chplfmt._chapel import chapel
-from chplfmt.doc import Doc, align, concat, fill, hardline, indent, line, render
+from chplfmt.doc import (
+    Doc,
+    align,
+    concat,
+    fill,
+    flat_width,
+    hardline,
+    indent,
+    line,
+)
 from chplfmt.printer.common import (
     HEADER_ANCHORS,
     attach_body,
@@ -15,7 +24,6 @@ from chplfmt.printer.common import (
     with_attributes,
 )
 from chplfmt.printer.core import Printer, printer
-from chplfmt.source import display_width
 from chplfmt.tokens import Node
 
 
@@ -144,8 +152,5 @@ def _fits(p: Printer, flat: Doc) -> bool:
     width = p.options.line_length
     if not width:
         return True
-    out = render(flat, p.options).text
-    return (
-        "\n" not in out
-        and p.indent + display_width(out, 0, p.options.tab_size) <= width
-    )
+    w = flat_width(flat, p.options)
+    return w is not None and p.indent + w <= width

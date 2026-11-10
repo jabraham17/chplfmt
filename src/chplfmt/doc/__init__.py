@@ -22,13 +22,20 @@ from chplfmt.doc.ir import (
     line,
     line_suffix,
     literalline,
+    on_render,
     softline,
     suffix_break,
     text,
     trailing_comment,
     verbatim,
 )
-from chplfmt.doc.render import LineRecord, RenderResult, align_trailing_comments, render
+from chplfmt.doc.render import (
+    LineRecord,
+    RenderResult,
+    align_trailing_comments,
+    flat_width,
+    render,
+)
 
 __all__ = [
     "ALL_LINES",
@@ -48,6 +55,7 @@ __all__ = [
     "conditional_group",
     "dump",
     "fill",
+    "flat_width",
     "group",
     "hardline",
     "if_break",
@@ -55,6 +63,7 @@ __all__ = [
     "line",
     "line_suffix",
     "literalline",
+    "on_render",
     "render",
     "softline",
     "suffix_break",

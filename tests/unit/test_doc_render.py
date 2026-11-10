@@ -17,6 +17,7 @@ from chplfmt.doc import (
     conditional_group,
     dump,
     fill,
+    flat_width,
     group,
     hardline,
     if_break,
@@ -24,6 +25,7 @@ from chplfmt.doc import (
     line,
     line_suffix,
     literalline,
+    on_render,
     render,
     softline,
     suffix_break,
@@ -36,6 +38,20 @@ from chplfmt.doc.render import _Printer  # pyright: ignore[reportPrivateUsage]
 
 def r(doc: DocLike, n: int = 80, tab: int = 2, base: int = 0) -> str:
     return render(doc, FormatOptions(line_length=n, tab_size=tab), base).text
+
+
+def test_on_render_runs_only_in_the_chosen_layout() -> None:
+    calls: list[str] = []
+    flat = concat("a", on_render(lambda: calls.append("flat")))
+    broken = concat("a", hardline, on_render(lambda: calls.append("broken")))
+    assert r(conditional_group([flat, broken], check=ALL_LINES), n=80) == "a"
+    assert calls == ["flat"]
+
+
+def test_flat_width() -> None:
+    opts = FormatOptions(line_length=5)
+    assert flat_width(group(concat("abc", line, "defgh")), opts) == 9
+    assert flat_width(concat("a", hardline, "b"), opts) is None
 
 
 # Builders shaped like the printer's (design section 7.7).

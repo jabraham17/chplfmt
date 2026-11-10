@@ -26,19 +26,19 @@ def printer_for(source: str, **kwargs: Any) -> tuple[Printer, TokenIndex]:
 
 
 def test_fallback_reindents_relative_to_first_line() -> None:
-    src = "  proc f() {\n      if x {\n        g();\n      }\n    }\n"
-    assert fmt(src) == "proc f() {\n    if x {\n      g();\n    }\n  }\n"
+    src = "  while x {\n      if x {\n        g();\n      }\n    }\n"
+    assert fmt(src) == "while x {\n    if x {\n      g();\n    }\n  }\n"
 
 
 def test_fallback_never_goes_below_column_zero() -> None:
-    src = "    proc f() {\n  g();\n}\n"
-    assert fmt(src) == "proc f() {\ng();\n}\n"
+    src = "    while x {\n  g();\n}\n"
+    assert fmt(src) == "while x {\ng();\n}\n"
 
 
 def test_tabs_become_spaces_by_display_width() -> None:
-    src = "\tproc f() {\n\t\tvar x\t= 1;\n\t}\n"
+    src = "\twhile x {\n\t\tvar x\t= 1;\n\t}\n"
     # Indentation moves by the first line's (4); the inner tab fills to col 16.
-    assert fmt(src, tab_size=4) == "proc f() {\n    var x   = 1;\n}\n"
+    assert fmt(src, tab_size=4) == "while x {\n    var x   = 1;\n}\n"
 
 
 def test_crlf_and_trailing_whitespace() -> None:
@@ -85,17 +85,17 @@ def test_blank_lines_inside_fallback_collapse() -> None:
 
 
 def test_module_members_fall_back_individually() -> None:
-    src = "module M {\n  var x;\n}\n"
+    src = "module M {\n  x  = 1;\n}\n"
     result = api.format_text(src)
     assert result.text == src
-    assert result.report.fallbacks == ["Variable@2:3"]
+    assert result.report.fallbacks == ["OpCall@2:3"]
 
 
 def test_fallback_keeps_attributes() -> None:
-    src = "@chpldoc.nodoc\nvar  x = 1;\n@unstable  proc f() { }\n"
+    src = "@gpu.assertEligible\nforeach  i in 1..2 { }\n"
     result = api.format_text(src)
     assert result.text == src
-    assert "Function@3:1" in result.report.fallbacks
+    assert result.report.fallbacks == ["Foreach@1:1"]
 
 
 # Top-level statement list
@@ -149,8 +149,8 @@ def test_off_region_to_end_of_file() -> None:
 
 def test_off_region_inside_fallback() -> None:
     region = "  // chplfmt: off\n\tvar  x ;  \n  // chplfmt: on"
-    src = f"  proc f() {{\n{region}\n      var y;\n  }}\n"
-    assert fmt(src) == f"proc f() {{\n{region}\n    var y;\n}}\n"
+    src = f"  while x {{\n{region}\n      var y;\n  }}\n"
+    assert fmt(src) == f"while x {{\n{region}\n    var y;\n}}\n"
 
 
 def test_extern_block_is_byte_identical() -> None:
@@ -198,14 +198,14 @@ def test_print_adds_user_parens() -> None:
 
 
 def test_nested_tracks_indent_for_fallback() -> None:
-    p, index = printer_for("proc f() {\ng();\n    }\n")
+    p, index = printer_for("while x {\ng();\n    }\n")
     (fn,) = index.children(index.roots[0])
     with p.nested() as n:
         assert p.indent == 2
         body = p.print(fn)
     assert p.indent == 0
     doc = concat("{", indent(concat(hardline, body), n), hardline, "}", hardline)
-    assert render(doc, p.options).text == "{\n  proc f() {\n  g();\n      }\n}\n"
+    assert render(doc, p.options).text == "{\n  while x {\n  g();\n      }\n}\n"
 
 
 def test_off_region_node_prints_verbatim() -> None:
