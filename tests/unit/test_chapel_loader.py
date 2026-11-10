@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -41,11 +42,15 @@ class FakeRun:
 
 
 @pytest.fixture
-def clean_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+def clean_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch]:
+    saved = dict(os.environ)
     for name in ("CHPL_HOME", "CHPL_THIRD_PARTY", "CHPLFMT_CHAPEL_PY"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(sys, "path", list(sys.path))
-    return monkeypatch
+    yield monkeypatch
+    # The loader sets variables directly; monkeypatch only restores what it saw.
+    os.environ.clear()
+    os.environ.update(saved)
 
 
 def fake_chapel(version: str = "2.10.0 pre-release (abc)") -> ModuleType:
