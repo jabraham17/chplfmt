@@ -1,4 +1,7 @@
 .venv/
+/native/target/
+/src/chplfmt/_native*.so
+/src/chplfmt/_native*.pyd
 __pycache__/
 *.py[cod]
 *.egg-info/

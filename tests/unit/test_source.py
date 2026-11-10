@@ -1,3 +1,9 @@
+import subprocess
+import sys
+import tomllib
+import unicodedata
+from pathlib import Path
+
 import pytest
 
 from chplfmt.source import (
@@ -81,6 +87,35 @@ def test_char_width() -> None:
     assert char_width("\u4e2d") == 2
     assert char_width("\uff21") == 2  # fullwidth A
     assert char_width("\U0001f600") == 2
+
+
+def test_width_table_matches_minimum_python() -> None:
+    root = Path(__file__).resolve().parents[2]
+    minimum = tomllib.loads((root / "pyproject.toml").read_text())["project"][
+        "requires-python"
+    ].removeprefix(">=")
+    table = (root / "native/core/src/width/width_table.rs").read_text()
+    assert f'pub const PYTHON_VERSION: &str = "{minimum}";' in table
+    if sys.version_info[:2] != tuple(map(int, minimum.split("."))):
+        return
+
+    assert (
+        f'pub const UNICODE_VERSION: &str = "{unicodedata.unidata_version}";' in table
+    )
+    subprocess.run(
+        [sys.executable, str(root / "native/tools/gen_width_table.py"), "--check"],
+        check=True,
+    )
+    for code in range(0x110000):
+        if 0xD800 <= code <= 0xDFFF:
+            continue
+        ch = chr(code)
+        expected = (
+            1
+            if code < 0x1100
+            else 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+        )
+        assert char_width(ch) == expected, f"U+{code:04X}"
 
 
 def test_display_width_tab_stops() -> None:

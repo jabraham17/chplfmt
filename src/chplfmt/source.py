@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import unicodedata
 from bisect import bisect_right
 from collections.abc import Sequence
 from itertools import repeat
+
+from chplfmt._native import char_width as char_width
+from chplfmt._native import display_width as display_width
 
 DEFAULT_TAB_SIZE = 2
 
@@ -20,34 +22,6 @@ class SourceDecodeError(ValueError):
         self.line = line
         self.byte_col = byte_col
         super().__init__(f"{line}:{byte_col}: invalid UTF-8 ({reason})")
-
-
-def char_width(ch: str) -> int:
-    """Display width of one code point: 2 for East Asian Wide/Fullwidth, else 1."""
-    if ch < "\u1100":
-        return 1
-    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
-
-
-def display_width(
-    text: str, start_col: int = 0, tab_size: int = DEFAULT_TAB_SIZE
-) -> int:
-    """Return the 0-based display column reached after `text` starting at `start_col`.
-
-    A tab advances to the next multiple of `tab_size`, measured from the
-    absolute column; a newline restarts at column 0.
-    """
-    if text.isascii() and "\t" not in text and "\n" not in text:
-        return start_col + len(text)
-    col = start_col
-    for ch in text:
-        if ch == "\t":
-            col += tab_size - col % tab_size
-        elif ch == "\n":
-            col = 0
-        else:
-            col += char_width(ch)
-    return col
 
 
 class SourceText:
