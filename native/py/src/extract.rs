@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use chplfmt_core::index::{AstFacts, BaseRule, Extra, NodeClass, NodeId, NO_NODE};
+use chplfmt_core::index::{AstFacts, BaseRule, BracketRule, Extra, NodeClass, NodeId, NO_NODE};
 use chplfmt_core::lexer::token::Pos;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -45,6 +45,29 @@ fn rule(value: u8) -> PyResult<BaseRule> {
     }
 }
 
+fn bracket_rule(value: u8) -> PyResult<BracketRule> {
+    match value {
+        0 => Ok(BracketRule::None),
+        1 => Ok(BracketRule::FnCall),
+        2 => Ok(BracketRule::FirstParen),
+        3 => Ok(BracketRule::OpCall),
+        4 => Ok(BracketRule::Catch),
+        5 => Ok(BracketRule::Square),
+        6 => Ok(BracketRule::Domain),
+        7 => Ok(BracketRule::Visibility),
+        8 => Ok(BracketRule::Function),
+        9 => Ok(BracketRule::Interface),
+        _ => Err(pyo3::exceptions::PyValueError::new_err(
+            "invalid bracket rule",
+        )),
+    }
+}
+
+fn optional_location(node: &Bound<'_, PyAny>, method: &str) -> PyResult<Option<(Pos, Pos)>> {
+    let value = node.call_method0(method)?;
+    (!value.is_none()).then(|| location(&value)).transpose()
+}
+
 pub fn walk(
     py: Python<'_>,
     source: &Bound<'_, PyAny>,
@@ -70,10 +93,14 @@ pub fn walk(
         let class = if let Some(&class) = classes.get(&(ty.as_ptr() as usize)) {
             class
         } else {
-            let (base, body_owner): (u8, bool) = classify.call1((ty.clone(),))?.extract()?;
+            let (base, body_owner, brackets, expression_kind, flags): (u8, bool, u8, bool, u16) =
+                classify.call1((ty.clone(),))?.extract()?;
             let class = NodeClass {
                 base: rule(base)?,
                 body_owner,
+                brackets: bracket_rule(brackets)?,
+                expression_kind,
+                flags,
             };
             classes.insert(ty.as_ptr() as usize, class);
             class
@@ -91,12 +118,7 @@ pub fn walk(
                 Err(error) => Some(Err(error)),
             })
             .collect::<PyResult<_>>()?;
-        let curly = if class.base == BaseRule::Block || class.body_owner {
-            let value = node.call_method0("curly_braces_location")?;
-            (!value.is_none()).then(|| location(&value)).transpose()?
-        } else {
-            None
-        };
+        let curly = optional_location(node, "curly_braces_location")?;
         let extra = Extra {
             implicit_module: class.base == BaseRule::Module
                 && node.call_method0("kind")?.eq("implicit")?,
@@ -106,6 +128,24 @@ pub fn walk(
             } else {
                 false
             },
+            name: if class.brackets == BracketRule::Function {
+                optional_location(node, "name_location")?
+            } else {
+                None
+            },
+            tuple_expansion: class.brackets == BracketRule::OpCall
+                && node.call_method0("op")?.eq("...")?,
+            catch_parens: class.brackets == BracketRule::Catch
+                && node.call_method0("has_parens_around_error")?.is_truthy()?,
+            domain_curly: class.brackets == BracketRule::Domain
+                && node.call_method0("used_curly_braces")?.is_truthy()?,
+            formal_list: class.brackets == BracketRule::Interface
+                && node.call_method0("is_formal_list_explicit")?.is_truthy()?,
+            parenless: class.brackets == BracketRule::Function
+                && node.call_method0("is_parenless")?.is_truthy()?,
+            expression_level: class.expression_kind
+                && node.call_method0("is_expression_level")?.is_truthy()?,
+            ..Extra::default()
         };
         if node.is_instance(extern_block)? {
             let start = loc.call_method0("start")?;
@@ -136,6 +176,21 @@ pub fn walk(
         }
         facts.kids[next_slot[parent as usize] as usize] = id as NodeId;
         next_slot[parent as usize] += 1;
+    }
+    for (id, node) in nodes.iter().enumerate() {
+        let node = node.bind(py);
+        if facts.class[id].brackets == BracketRule::FnCall {
+            let called = node.call_method0("called_expression")?;
+            facts.extra[id].called = id_of
+                .get_item(called)?
+                .map(|value| value.extract())
+                .transpose()?;
+        }
+        if facts.parent[id] != NO_NODE
+            && facts.class[facts.parent[id] as usize].brackets == BracketRule::FnCall
+        {
+            facts.extra[id].paren = optional_location(node, "paren_location")?;
+        }
     }
     opaque.sort_unstable();
     Ok(Extracted {

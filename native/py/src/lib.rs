@@ -11,7 +11,7 @@ use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError, PyZeroDivisionError};
 use pyo3::prelude::*;
 use pyo3::sync::GILOnceCell;
-use pyo3::types::{PyDict, PyString, PyTuple};
+use pyo3::types::{PyDict, PyList, PyString, PyTuple};
 
 create_exception!(chplfmt._native, NativeLexError, PyException);
 
@@ -255,12 +255,16 @@ fn lex(py: Python<'_>, text: &str, opaque: Vec<(usize, usize)>) -> PyResult<Vec<
         .collect()
 }
 
-#[pyclass(name = "NativeIndex")]
+#[pyclass(subclass, name = "NativeIndex")]
 struct NativeIndex {
     value: CoreIndex,
     nodes: Vec<Py<PyAny>>,
     id_of: Py<PyDict>,
-    tokens: Vec<Py<PyToken>>,
+    tokens: Py<PyList>,
+    text: String,
+    source: Py<PyAny>,
+    roots: Py<PyAny>,
+    comment: Py<PyAny>,
 }
 
 impl NativeIndex {
@@ -280,11 +284,18 @@ impl NativeIndex {
 #[pymethods]
 impl NativeIndex {
     #[getter]
-    fn tokens(&self, py: Python<'_>) -> Vec<Py<PyToken>> {
-        self.tokens
-            .iter()
-            .map(|token| token.clone_ref(py))
-            .collect()
+    fn source(&self, py: Python<'_>) -> Py<PyAny> {
+        self.source.clone_ref(py)
+    }
+
+    #[getter]
+    fn roots(&self, py: Python<'_>) -> Py<PyAny> {
+        self.roots.clone_ref(py)
+    }
+
+    #[getter]
+    fn tokens(&self, py: Python<'_>) -> Py<PyList> {
+        self.tokens.clone_ref(py)
     }
 
     #[getter]
@@ -341,6 +352,128 @@ impl NativeIndex {
         Ok(self.node_id(node)?.and_then(|id| self.value.node_span(id)))
     }
 
+    fn structural_brackets(&self, node: &Bound<'_, PyAny>) -> PyResult<Vec<u32>> {
+        Ok(self
+            .node_id(node)?
+            .map_or_else(Vec::new, |id| self.value.structural_brackets(id).to_vec()))
+    }
+
+    fn user_parens(
+        &self,
+        py: Python<'_>,
+        node: &Bound<'_, PyAny>,
+    ) -> PyResult<Vec<(u32, u32, Py<PyAny>)>> {
+        Ok(self.node_id(node)?.map_or_else(Vec::new, |id| {
+            self.value
+                .user_parens(id)
+                .iter()
+                .filter_map(|&(open, close, kid)| {
+                    self.node(py, kid).map(|child| (open, close, child))
+                })
+                .collect()
+        }))
+    }
+
+    fn parens_around(&self, node: &Bound<'_, PyAny>) -> PyResult<Vec<(u32, u32)>> {
+        Ok(self
+            .node_id(node)?
+            .map_or_else(Vec::new, |id| self.value.parens_around(id).to_vec()))
+    }
+
+    fn unexplained_brackets(&self, node: &Bound<'_, PyAny>) -> PyResult<Vec<u32>> {
+        Ok(self.node_id(node)?.map_or_else(Vec::new, |id| {
+            self.value.unexplained_brackets(&self.text, id)
+        }))
+    }
+
+    fn body_delimiters(&self, node: &Bound<'_, PyAny>) -> PyResult<Vec<u32>> {
+        Ok(self
+            .node_id(node)?
+            .map_or_else(Vec::new, |id| self.value.body_delimiters(&self.text, id)))
+    }
+
+    fn is_wide_identifier(&self, node: &Bound<'_, PyAny>) -> PyResult<bool> {
+        Ok(self
+            .node_id(node)?
+            .is_some_and(|id| self.value.is_wide_identifier(id)))
+    }
+
+    fn stmt_span(&self, node: &Bound<'_, PyAny>) -> PyResult<Option<(u32, u32)>> {
+        Ok(self
+            .node_id(node)?
+            .and_then(|id| self.value.stmt_span(&self.text, id)))
+    }
+
+    fn header_span(&self, node: &Bound<'_, PyAny>) -> PyResult<Option<(u32, u32)>> {
+        let Some(id) = self.node_id(node)? else {
+            return Ok(None);
+        };
+        let class = self.value.facts.class[id as usize];
+        if class.flags & 4 != 0 {
+            if let Some(&open) = self.value.structural_brackets(id).first() {
+                let close = self.value.tokens[open as usize].partner;
+                return Ok(Some((open, close)));
+            }
+        }
+        let mut loc = if class.flags & 8 != 0 {
+            node.call_method0("header_location")?
+        } else {
+            node.py().None().into_bound(node.py())
+        };
+        if loc.is_none() {
+            loc = node.call_method0("block_header")?;
+        }
+        if loc.is_none() {
+            return Ok(None);
+        }
+        let (start, end) = extract::location(&loc)?;
+        Ok(self.value.header_span(start, end))
+    }
+
+    fn body_span(&self, node: &Bound<'_, PyAny>) -> PyResult<Option<(u32, u32)>> {
+        let Some(id) = self.node_id(node)? else {
+            return Ok(None);
+        };
+        let class = self.value.facts.class[id as usize];
+        if class.base == chplfmt_core::index::BaseRule::Block {
+            return Ok(self.value.node_span(id));
+        }
+        if class.flags & 16 != 0 {
+            let body = node.call_method0("body")?;
+            if !body.is_none() {
+                return Ok(self
+                    .node_id(&body)?
+                    .and_then(|child| self.value.node_span(child)));
+            }
+        }
+        if let Some((start, end)) = self.value.facts.curly[id as usize] {
+            return Ok(self.value.span(start, end));
+        }
+        if class.flags & 32 != 0 {
+            let mut spans = Vec::new();
+            for stmt in node.call_method0("stmts")?.try_iter()? {
+                if let Some(sp) = self
+                    .node_id(&stmt?)?
+                    .and_then(|child| self.value.node_span(child))
+                {
+                    spans.push(sp);
+                }
+            }
+            if let (Some(first), Some(last)) = (spans.first(), spans.last()) {
+                return Ok(Some((first.0, last.1)));
+            }
+        }
+        Ok(None)
+    }
+
+    fn next_code(&self, token: u32) -> u32 {
+        self.value.next_code(token)
+    }
+
+    fn prev_code(&self, token: u32) -> Option<u32> {
+        self.value.prev_code(token)
+    }
+
     fn owner(&self, py: Python<'_>, token: u32) -> Option<Py<PyAny>> {
         self.node(py, self.value.owner(token))
     }
@@ -366,6 +499,42 @@ impl NativeIndex {
             .node_id(node)?
             .map_or_else(Vec::new, |id| self.value.own_tokens(id).to_vec()))
     }
+
+    fn ast_children(&self, node: &Bound<'_, PyAny>) -> PyResult<Vec<Py<PyAny>>> {
+        if let Some(id) = self.node_id(node)? {
+            let (start, end) = self.value.facts.kid_range[id as usize];
+            return Ok(self.value.facts.kids[start as usize..end as usize]
+                .iter()
+                .filter_map(|&kid| self.node(node.py(), kid))
+                .collect());
+        }
+        node.try_iter()?
+            .filter_map(|child| match child {
+                Ok(child) => match child.is_instance(self.comment.bind(node.py())) {
+                    Ok(false) => Some(Ok(child.unbind())),
+                    Ok(true) => None,
+                    Err(error) => Some(Err(error)),
+                },
+                Err(error) => Some(Err(error)),
+            })
+            .collect()
+    }
+
+    fn check_leaves(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(PyModule::import(py, "chplfmt.tokens")?
+            .getattr("TokenIndex")?
+            .getattr("check_leaves")?
+            .call1((slf,))?
+            .unbind())
+    }
+
+    fn check_ownership(slf: PyRef<'_, Self>, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(PyModule::import(py, "chplfmt.tokens")?
+            .getattr("TokenIndex")?
+            .getattr("check_ownership")?
+            .call1((slf,))?
+            .unbind())
+    }
 }
 
 #[pyfunction]
@@ -381,11 +550,16 @@ fn build_index(
     let text: String = source.getattr("text")?.extract()?;
     let tokens = lex(py, &text, extracted.opaque)?;
     let core_tokens = tokens.iter().map(|token| token.borrow(py).value).collect();
+    let token_list = PyList::new(py, &tokens)?.unbind();
     Ok(NativeIndex {
         value: CoreIndex::new(&text, core_tokens, extracted.facts),
         nodes: extracted.nodes,
         id_of: extracted.id_of,
-        tokens,
+        tokens: token_list,
+        text,
+        source: source.clone().unbind(),
+        roots: roots.clone().unbind(),
+        comment: comment.clone().unbind(),
     })
 }
 

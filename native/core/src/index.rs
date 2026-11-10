@@ -21,16 +21,43 @@ pub enum BaseRule {
     Other,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BracketRule {
+    #[default]
+    None,
+    FnCall,
+    FirstParen,
+    OpCall,
+    Catch,
+    Square,
+    Domain,
+    Visibility,
+    Function,
+    Interface,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NodeClass {
     pub base: BaseRule,
     pub body_owner: bool,
+    pub brackets: BracketRule,
+    pub expression_kind: bool,
+    pub flags: u16,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Extra {
     pub implicit_module: bool,
     pub implicit_formal: bool,
+    pub called: Option<NodeId>,
+    pub name: Option<(Pos, Pos)>,
+    pub paren: Option<(Pos, Pos)>,
+    pub tuple_expansion: bool,
+    pub catch_parens: bool,
+    pub domain_curly: bool,
+    pub formal_list: bool,
+    pub parenless: bool,
+    pub expression_level: bool,
 }
 
 #[derive(Default)]
@@ -53,6 +80,9 @@ pub struct TokenIndex {
     src_kids: Vec<Vec<NodeId>>,
     owner: Vec<NodeId>,
     own: Vec<Vec<u32>>,
+    structural: Vec<Vec<u32>>,
+    user_parens: Vec<Vec<(u32, u32, NodeId)>>,
+    parens_around: Vec<Vec<Span>>,
     pub problems: Vec<(NodeId, NodeId)>,
 }
 
@@ -69,10 +99,14 @@ impl TokenIndex {
             src_kids: vec![Vec::new(); count],
             owner,
             own: vec![Vec::new(); count],
+            structural: vec![Vec::new(); count],
+            user_parens: vec![Vec::new(); count],
+            parens_around: vec![Vec::new(); count],
             problems: Vec::new(),
         };
         index.compute_spans(text);
         index.compute_ownership();
+        index.compute_brackets(text);
         index
     }
 
@@ -138,6 +172,36 @@ impl TokenIndex {
         self.spans.get(node as usize).copied().flatten()
     }
 
+    pub fn header_span(&self, start: Pos, end: Pos) -> Option<Span> {
+        let (first, last) = self.span(start, end)?;
+        if self.sig_ends.contains(&end) {
+            return Some((first, self.prev_code(last).unwrap_or(first)));
+        }
+        Some((first, last))
+    }
+
+    pub fn stmt_span(&self, text: &str, node: NodeId) -> Option<Span> {
+        let (first, last) = self.node_span(node)?;
+        let next = self.next_code(last);
+        (self.tokens[next as usize].kind == TokenKind::Punct
+            && self.text(text, next) == ";"
+            && (self.owner(next) == NO_NODE
+                || self.facts.class[self.owner(next) as usize].flags & 2 == 0))
+            .then_some((first, next))
+            .or(Some((first, last)))
+    }
+
+    pub fn is_wide_identifier(&self, node: NodeId) -> bool {
+        if self.facts.class[node as usize].flags & 1 == 0 {
+            return false;
+        }
+        let parent = self.facts.parent[node as usize];
+        parent != NO_NODE
+            && self.facts.class[parent as usize].brackets == BracketRule::FnCall
+            && self.facts.extra[parent as usize].called == Some(node)
+            && self.facts.loc[node as usize] == self.facts.loc[parent as usize]
+    }
+
     pub fn owner(&self, token: u32) -> NodeId {
         self.owner[token as usize]
     }
@@ -148,6 +212,235 @@ impl TokenIndex {
 
     pub fn children(&self, node: NodeId) -> &[NodeId] {
         &self.src_kids[node as usize]
+    }
+
+    pub fn structural_brackets(&self, node: NodeId) -> &[u32] {
+        &self.structural[node as usize]
+    }
+
+    pub fn user_parens(&self, node: NodeId) -> &[(u32, u32, NodeId)] {
+        &self.user_parens[node as usize]
+    }
+
+    pub fn parens_around(&self, node: NodeId) -> &[Span] {
+        &self.parens_around[node as usize]
+    }
+
+    fn compute_brackets(&mut self, text: &str) {
+        for node in 0..self.facts.class.len() {
+            self.structural[node] = self.find_structural_brackets(text, node as NodeId);
+        }
+        for node in 0..self.facts.class.len() {
+            self.user_parens[node] = self.find_user_parens(text, node as NodeId);
+        }
+        for node in 0..self.facts.class.len() {
+            for &(open, close, kid) in &self.user_parens[node] {
+                let mut parent = self.facts.parent[kid as usize];
+                while parent != NO_NODE
+                    && self.facts.class[parent as usize].base == BaseRule::Block
+                    && !self.from_curly[parent as usize]
+                {
+                    parent = self.facts.parent[parent as usize];
+                }
+                if parent == node as NodeId {
+                    self.parens_around[kid as usize].push((open, close));
+                }
+            }
+        }
+        for layers in &mut self.parens_around {
+            layers.sort_unstable_by(|a, b| b.cmp(a));
+        }
+    }
+
+    fn first_own(&self, text: &str, node: NodeId, chars: &str, after: Option<u32>) -> Vec<u32> {
+        self.own_tokens(node)
+            .iter()
+            .copied()
+            .find(|&token| {
+                after.is_none_or(|last| token > last)
+                    && self.tokens[token as usize].kind == TokenKind::Punct
+                    && chars.contains(self.text(text, token))
+            })
+            .into_iter()
+            .collect()
+    }
+
+    fn find_structural_brackets(&self, text: &str, node: NodeId) -> Vec<u32> {
+        let class = self.facts.class[node as usize];
+        let extra = self.facts.extra[node as usize];
+        let mut found = match class.brackets {
+            BracketRule::FnCall => {
+                let called_end = extra
+                    .called
+                    .and_then(|called| self.node_span(called))
+                    .map(|sp| sp.1);
+                let mut opens = called_end
+                    .map_or_else(Vec::new, |end| self.first_own(text, node, "([", Some(end)));
+                if let Some(&open) = opens.first() {
+                    if self.text(text, open) == "(" {
+                        let close = self.tokens[open as usize].partner;
+                        let inside: Vec<_> = self
+                            .children(node)
+                            .iter()
+                            .copied()
+                            .filter(|&kid| {
+                                let start = self.spans[kid as usize].unwrap().0;
+                                open < start && start < close
+                            })
+                            .collect();
+                        if inside.len() == 1
+                            && self.facts.extra[inside[0] as usize]
+                                .paren
+                                .and_then(|(start, end)| self.span(start, end))
+                                == Some((open, close))
+                        {
+                            opens.clear();
+                        }
+                    }
+                }
+                opens
+            }
+            BracketRule::FirstParen => self.first_own(text, node, "(", None),
+            BracketRule::OpCall if extra.tuple_expansion => self.first_own(text, node, "(", None),
+            BracketRule::Catch if extra.catch_parens => self.first_own(text, node, "(", None),
+            BracketRule::Square => self.first_own(text, node, "[", None),
+            BracketRule::Domain => {
+                self.first_own(text, node, if extra.domain_curly { "{" } else { "[" }, None)
+            }
+            BracketRule::Visibility => self.first_own(text, node, "{", None),
+            BracketRule::Function if !extra.parenless => {
+                let after = extra
+                    .name
+                    .and_then(|(start, end)| self.span(start, end))
+                    .and_then(|sp| sp.0.checked_sub(1));
+                self.first_own(text, node, "(", after)
+            }
+            BracketRule::Interface if extra.formal_list => self.first_own(text, node, "(", None),
+            _ => Vec::new(),
+        };
+        if class.base == BaseRule::Block {
+            if self.from_curly[node as usize] {
+                if let Some((first, _)) = self.node_span(node) {
+                    found.push(first);
+                }
+            }
+        } else if let Some((start, end)) = self.facts.curly[node as usize] {
+            if let Some((first, _)) = self.span(start, end) {
+                if self.owner(first) == node {
+                    found.push(first);
+                }
+            }
+        }
+        found
+    }
+
+    fn unwrap_implicit_block(&self, mut node: NodeId) -> NodeId {
+        while self.facts.class[node as usize].base == BaseRule::Block
+            && !self.from_curly[node as usize]
+        {
+            let kids = self.children(node);
+            if kids.len() != 1 || self.node_span(kids[0]) != self.node_span(node) {
+                break;
+            }
+            node = kids[0];
+        }
+        node
+    }
+
+    fn find_user_parens(&self, text: &str, node: NodeId) -> Vec<(u32, u32, NodeId)> {
+        let own = self.own_tokens(node);
+        if !own.iter().any(|&token| self.text(text, token) == "(") {
+            return Vec::new();
+        }
+        let structural = self.structural_brackets(node);
+        let mut found = Vec::new();
+        for &open in own {
+            let tok = &self.tokens[open as usize];
+            if tok.kind != TokenKind::Punct
+                || self.text(text, open) != "("
+                || structural.contains(&open)
+            {
+                continue;
+            }
+            let close = tok.partner;
+            assert_ne!(close, NO_MATCH);
+            let inside: Vec<_> = self
+                .children(node)
+                .iter()
+                .copied()
+                .filter(|&kid| {
+                    let start = self.spans[kid as usize].unwrap().0;
+                    open < start && start <= close
+                })
+                .collect();
+            let others = own.iter().any(|&token| {
+                open < token
+                    && token < close
+                    && !matches!(
+                        self.tokens[token as usize].kind,
+                        TokenKind::LineComment | TokenKind::BlockComment
+                    )
+                    && !matches!(self.text(text, token), "(" | ")")
+            });
+            if inside.len() == 1 && self.spans[inside[0] as usize].unwrap().1 < close && !others {
+                found.push((open, close, self.unwrap_implicit_block(inside[0])));
+            }
+        }
+        found
+    }
+
+    pub fn unexplained_brackets(&self, text: &str, node: NodeId) -> Vec<u32> {
+        let structural = self.structural_brackets(node);
+        let user = self.user_parens(node);
+        self.own_tokens(node)
+            .iter()
+            .copied()
+            .filter(|&token| {
+                let tok = &self.tokens[token as usize];
+                if tok.kind != TokenKind::Punct || tok.partner == NO_MATCH {
+                    return false;
+                }
+                match self.text(text, token) {
+                    "(" | "[" | "{" => {
+                        !structural.contains(&token)
+                            && !user.iter().any(|&(open, _, _)| open == token)
+                    }
+                    _ => !structural
+                        .iter()
+                        .chain(user.iter().map(|triple| &triple.0))
+                        .any(|&open| self.tokens[open as usize].partner == token),
+                }
+            })
+            .collect()
+    }
+
+    pub fn body_delimiters(&self, text: &str, node: NodeId) -> Vec<u32> {
+        let mut found = Vec::new();
+        if !matches!(
+            self.facts.class[node as usize].brackets,
+            BracketRule::Domain | BracketRule::Visibility
+        ) {
+            for &open in self.structural_brackets(node) {
+                if self.text(text, open) == "{" {
+                    let close = self.tokens[open as usize].partner;
+                    if close != NO_MATCH {
+                        found.extend([open, close]);
+                    }
+                }
+            }
+        }
+        if self.facts.extra[node as usize].expression_level {
+            return found;
+        }
+        for &token in self.own_tokens(node) {
+            if self.tokens[token as usize].kind == TokenKind::Ident
+                && matches!(self.text(text, token), "do" | "then")
+            {
+                found.push(token);
+            }
+        }
+        found.sort_unstable();
+        found
     }
 
     fn token_at(&self, pos: Pos) -> u32 {

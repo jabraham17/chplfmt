@@ -54,8 +54,54 @@ def _category(cls: type) -> int:
     return next((k for k, c in _CATEGORIES if issubclass(cls, c)), _OTHER)
 
 
-def _native_class(cls: type) -> tuple[int, bool]:
-    return _category(cls), issubclass(cls, _BODY_OWNERS)
+def _native_class(cls: type) -> tuple[int, bool, int, bool, int]:
+    bracket = next(
+        (
+            rule
+            for rule, types in enumerate(
+                (
+                    chapel.FnCall,
+                    _FIRST_PAREN,
+                    chapel.OpCall,
+                    chapel.Catch,
+                    (chapel.Array, chapel.BracketLoop),
+                    chapel.Domain,
+                    chapel.VisibilityClause,
+                    chapel.Function,
+                    chapel.Interface,
+                ),
+                1,
+            )
+            if issubclass(cls, cast(type | tuple[type, ...], types))
+        ),
+        0,
+    )
+    return (
+        _category(cls),
+        issubclass(cls, _BODY_OWNERS),
+        bracket,
+        issubclass(cls, (chapel.Conditional, chapel.IndexableLoop)),
+        int(issubclass(cls, chapel.Identifier))
+        | (int(issubclass(cls, chapel.EmptyStmt)) << 1)
+        | (int(issubclass(cls, chapel.BracketLoop)) << 2)
+        | (int(issubclass(cls, (chapel.NamedDecl, chapel.Loop))) << 3)
+        | (
+            int(
+                issubclass(
+                    cls,
+                    (
+                        chapel.Function,
+                        chapel.When,
+                        chapel.Catch,
+                        chapel.Try,
+                        chapel.Loop,
+                    ),
+                )
+            )
+            << 4
+        )
+        | (int(issubclass(cls, chapel.SimpleBlockLike)) << 5),
+    )
 
 
 def opaque_ranges(source: SourceText, asts: Iterable[Node]) -> list[tuple[int, int]]:
@@ -143,7 +189,9 @@ class TokenIndex:
         return cls(source, tokens, asts, walk=walk)
 
     @classmethod
-    def build_native(cls, source: SourceText, asts: Sequence[Node]) -> _native.NativeIndex:
+    def build_native(
+        cls, source: SourceText, asts: Sequence[Node]
+    ) -> _native.NativeIndex:
         """Build the opt-in native spans and ownership index for parity checks."""
         return _native.build_index(
             source, asts, _native_class, chapel.Comment, chapel.ExternBlock
@@ -178,6 +226,12 @@ class TokenIndex:
         while self.tokens[i].is_comment:
             i += 1
         return i
+
+    def find_start(self, pos: Pos) -> int | None:
+        return self.by_start.get(pos)
+
+    def find_end(self, pos: Pos) -> int | None:
+        return self.by_end.get(pos)
 
     def prev_code(self, i: int) -> int | None:
         """Index of the last non-comment token before `i`."""
@@ -619,12 +673,14 @@ class TokenIndex:
                 continue
             loc = node.location()
             where = f"{node.tag()} at {loc.start()}"
-            i = self.by_start.get(loc.start())
+            i = self.find_start(loc.start())
             if i is None:
                 problems.append(f"{where}: no token starts there")
                 continue
             tok = self.tokens[i]
-            end = self.by_end.get(loc.end())
+            end = self.find_end(loc.end())
+            if end is not None and self.tokens[end].end != loc.end():
+                end = None
             if end != i and (end is None or not self.is_wide_identifier(node)):
                 problems.append(
                     f"{where}: ends at {loc.end()}, token {tok.text!r} doesn't"
@@ -644,12 +700,12 @@ class TokenIndex:
         problems = list(self.problems)
         for i, tok in enumerate(self.tokens):
             if (
-                self._owner[i] is None
+                self.owner(i) is None
                 and not tok.is_comment
                 and tok.kind is not TokenKind.EOF
             ):
                 problems.append(f"token {tok.text!r} at {tok.start} has no owner")
-            if tok.match is not None and self._owner[i] != self._owner[tok.match]:
+            if tok.match is not None and self.owner(i) != self.owner(tok.match):
                 problems.append(
                     f"bracket {tok.text!r} at {tok.start} split across owners"
                 )

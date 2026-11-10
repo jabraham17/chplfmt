@@ -323,17 +323,33 @@ def test_owner_and_children() -> None:
 def test_native_index_phase_3a_parity(text: str) -> None:
     with indexed(text) as idx:
         native = TokenIndex.build_native(idx.source, idx.roots)
+        assert native.tokens is native.tokens
         assert native.tokens == idx.tokens
         assert native.problems == idx.problems
         assert native.nodes() == list(idx.nodes())
+        assert native.check_leaves() == idx.check_leaves()
+        assert native.check_ownership() == idx.check_ownership()
         for node in idx.nodes():
             assert native.span(node.location()) == idx.span(node.location())
             assert native.node_span(node) == idx.node_span(node)
+            assert native.header_span(node) == idx.header_span(node)
+            assert native.body_span(node) == idx.body_span(node)
+            assert native.stmt_span(node) == idx.stmt_span(node)
             assert native.parent(node) == idx.parent(node)
             assert native.children(node) == idx.children(node)
+            assert native.ast_children(node) == idx.ast_children(node)
             assert native.own_tokens(node) == idx.own_tokens(node)
+            assert native.structural_brackets(node) == idx.structural_brackets(node)
+            assert native.user_parens(node) == idx.user_parens(node)
+            assert native.parens_around(node) == idx.parens_around(node)
+            assert native.unexplained_brackets(node) == idx.unexplained_brackets(node)
+            assert native.body_delimiters(node) == idx.body_delimiters(node)
+            assert native.is_wide_identifier(node) == idx.is_wide_identifier(node)
         for token, value in enumerate(idx.tokens):
             assert native.owner(token) == idx.owner(token)
+            if token < len(idx.tokens) - 1:
+                assert native.next_code(token) == idx.next_code(token)
+            assert native.prev_code(token) == idx.prev_code(token)
             assert native.find_start(value.start) == idx.by_start[value.start]
             if value.kind is not TokenKind.EOF:
                 assert native.find_end(value.end) == idx.by_end[value.end]
