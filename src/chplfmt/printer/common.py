@@ -19,6 +19,8 @@ NO_SPACE_AFTER = frozenset({"(", "[", "."})
 SPACE_BEFORE_OPEN = frozenset(
     {":", "=", ",", "where", "lifetime", "return", "proc", "iter", "operator", "ref"}
     | {"const", "param", "type"}
+    | {"for", "forall", "foreach", "coforall", "in", "if", "while", "with"}
+    | {"then", "else", "do"}
 )
 
 
@@ -156,6 +158,19 @@ def attach_body(
         return concat(header, body)
     sep = text(" ") if p.options.brace_style == "attach" else hardline
     return concat(header, sep, body)
+
+
+def after_block(p: Printer, prev: Node, nxt: Node) -> Doc:
+    """What separates `}` of `prev` from `else`/`catch` (`else-placement`, `brace-style`)."""
+    if ends_line(p.trivia.trailing(prev)):
+        return text("")
+    if (
+        p.options.else_placement == "newline"
+        or p.options.brace_style == "break"
+        or any(c.placement is Placement.OWN_LINE for c in p.trivia.leading(nxt))
+    ):
+        return hardline
+    return text(" ")
 
 
 def body_statements(p: Printer, owner: Node, open_tok: int) -> list[Node]:

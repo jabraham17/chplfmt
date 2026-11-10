@@ -1,0 +1,67 @@
+proc f(x: int): int {
+  if x > 0 {
+    log(x);
+    return x;
+  } else {
+    log(-x);
+    return -x;
+  }
+}
+proc h() {
+  if done then return;
+}
+if a then b(); else c();
+if a then b(); else c();
+if a then b(); else c();
+if isValid(indix) && indix < limit && !visited[indix] &&
+   indix != sentinelValue {
+  visited[indix] = true;
+  visit(indix);
+}
+if !(scale == 0 || scale == 1 || scale == 2 || scale == 4 || scale == 8 ||
+     scale == 16 || scale == 32) then
+  halt("bad scale");
+if a then b();
+if a {
+  b();
+} else {
+  c();
+  d();
+}
+if aVeryLongConditionName && anotherVeryLongConditionName {
+  firstCall();
+} else {
+  secondCall();
+}
+if a {
+  b();
+} else if c {
+  d();
+} else {
+  e();
+}
+if a {
+  b();
+} else if c {
+  d();
+}
+if a {
+  b();
+} else if c {
+  d();
+} else if e {
+  f();
+}
+if var y = f() then g(y);
+if const z = h() then useIt(z);
+if a then ;
+if a then ; else b();
+if x then f(); else g();
+if (a) then b();
+proc g() {
+  if a then return 1; else return 2;
+  if cond then
+    someCall(withSomeArgument, andAnotherArgument, andYetAnotherArgument12);
+}
+var e = if a then b else c;
+var e2 = if a then b else if c then d else e;

@@ -9,14 +9,23 @@ import itertools
 from contextlib import ExitStack
 
 from chplfmt._chapel import chapel
-from chplfmt.doc import EMPTY, Doc, concat, conditional_group, hardline, indent, text
+from chplfmt.doc import (
+    EMPTY,
+    Doc,
+    concat,
+    conditional_group,
+    flat_width,
+    hardline,
+    indent,
+    text,
+)
 from chplfmt.printer.body import Body, Form
 from chplfmt.printer.common import (
+    after_block,
     attach_body,
     attribute_group,
     body_statements,
     braced,
-    ends_line,
     header_start,
     open_brace,
     semicolon,
@@ -31,9 +40,9 @@ from chplfmt.printer.lists import (
     bracket_layouts,
     bracket_list,
     list_fill,
+    list_item,
 )
 from chplfmt.tokens import Node
-from chplfmt.trivia import Placement
 
 
 @printer(chapel.Block)
@@ -298,19 +307,6 @@ def _block_child(p: Printer, node: Node) -> Node | None:
     )
 
 
-def _after_block(p: Printer, prev: Node, nxt: Node) -> Doc:
-    """What separates `}` of `prev` from `catch` (`else-placement`, `brace-style`)."""
-    if ends_line(p.trivia.trailing(prev)):
-        return EMPTY
-    if (
-        p.options.else_placement == "newline"
-        or p.options.brace_style == "break"
-        or any(c.placement is Placement.OWN_LINE for c in p.trivia.leading(nxt))
-    ):
-        return hardline
-    return text(" ")
-
-
 @printer(chapel.Try)
 def print_try(p: Printer, node: Node) -> Doc | None:
     """`try { } catch e: E { } catch { }`; `try! f();` and `try! f()` (expression)."""
@@ -323,7 +319,7 @@ def print_try(p: Printer, node: Node) -> Doc | None:
     d = Body(p, node, first, block=blk, form="block").doc(header)
     prev: Node = blk
     for c in node.handlers():
-        d = concat(d, _after_block(p, prev, c), p.print(c))
+        d = concat(d, after_block(p, prev, c), p.print(c))
         prev = c
     return with_attributes(p, node, d)
 
@@ -347,17 +343,32 @@ def print_catch(p: Printer, node: Node) -> Doc | None:
     return with_attributes(p, node, d)
 
 
-@printer(chapel.WithClause)
-def print_with_clause(p: Printer, node: Node) -> Doc | None:
-    """`with (ref x, + reduce y)`: never the break-after-`(` fallback (section 8.7)."""
+def with_clause(p: Printer, node: Node) -> tuple[Doc, int | None] | None:
+    """`with (ref x, + reduce y)` and the flat width of `with (` + first intent + `,`/`)`.
+
+    The width is None when comments are involved.
+    """
     opens = [i for i in p.index.own_tokens(node) if p.tokens[i].text == "("]
     if not opens:
         return None
     kids = [k for k in p.index.children(node) if p.index.node_span(k) is not None]
-    layouts = bracket_layouts(p, node, opens[0], kids, ListKind.FIXED)
+    quiet = not p.dangling(node)
+    items = [list_item(p, k) for k in kids]
+    layouts = bracket_layouts(p, node, opens[0], items, ListKind.FIXED)
     lst = layouts.doc() if layouts.aligned is None else layouts.aligned
     d = p.dangling_comments(node, "header")
-    return concat("with", d, " ", lst)
+    first_w = None
+    if items and quiet:
+        w = flat_width(concat(items[0].lead, items[0].body), p.options)
+        first_w = None if w is None else w + len("with (") + 1
+    return concat("with", d, " ", lst), first_w
+
+
+@printer(chapel.WithClause)
+def print_with_clause(p: Printer, node: Node) -> Doc | None:
+    """`with (ref x, + reduce y)`: never the break-after-`(` fallback (section 8.7)."""
+    wc = with_clause(p, node)
+    return None if wc is None else wc[0]
 
 
 def with_header(p: Printer, before: Doc, clause: Doc) -> Doc:

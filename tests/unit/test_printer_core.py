@@ -6,7 +6,7 @@ from chplfmt import api
 from chplfmt._chapel import chapel, parse_text
 from chplfmt.config import FormatOptions
 from chplfmt.doc import Doc, concat, hardline, indent, render, text
-from chplfmt.printer import Printer
+from chplfmt.printer import REGISTRY, Printer
 from chplfmt.source import SourceText
 from chplfmt.tokens import Node, TokenIndex
 
@@ -22,19 +22,29 @@ def printer_for(source: str, **kwargs: Any) -> tuple[Printer, TokenIndex]:
     return Printer(index, FormatOptions(), **kwargs), index
 
 
+@pytest.fixture
+def no_loops(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Loops fall back, so they can serve as fallback examples."""
+    for cls in (chapel.While, chapel.Foreach):
+        monkeypatch.delitem(REGISTRY, cls)
+
+
 # Fallback re-indentation
 
 
+@pytest.mark.usefixtures("no_loops")
 def test_fallback_reindents_relative_to_first_line() -> None:
     src = "  while x {\n      if x {\n        g();\n      }\n    }\n"
     assert fmt(src) == "while x {\n    if x {\n      g();\n    }\n  }\n"
 
 
+@pytest.mark.usefixtures("no_loops")
 def test_fallback_never_goes_below_column_zero() -> None:
     src = "    while x {\n  g();\n}\n"
     assert fmt(src) == "while x {\ng();\n}\n"
 
 
+@pytest.mark.usefixtures("no_loops")
 def test_tabs_become_spaces_by_display_width() -> None:
     src = "\twhile x {\n\t\tvar x\t= 1;\n\t}\n"
     # Indentation moves by the first line's (4); the inner tab fills to col 16.
@@ -84,6 +94,7 @@ def test_blank_lines_inside_fallback_collapse() -> None:
     )
 
 
+@pytest.mark.usefixtures("no_loops")
 def test_module_members_fall_back_individually() -> None:
     src = "module M {\n  while  x { f(); }\n}\n"
     result = api.format_text(src)
@@ -91,6 +102,7 @@ def test_module_members_fall_back_individually() -> None:
     assert result.report.fallbacks == ["While@2:3"]
 
 
+@pytest.mark.usefixtures("no_loops")
 def test_fallback_keeps_attributes() -> None:
     src = "@gpu.assertEligible\nforeach  i in 1..2 { }\n"
     result = api.format_text(src)
@@ -147,6 +159,7 @@ def test_off_region_to_end_of_file() -> None:
     assert fmt(f"var a;\n{region}\n\n") == f"var a;\n{region}\n"
 
 
+@pytest.mark.usefixtures("no_loops")
 def test_off_region_inside_fallback() -> None:
     region = "  // chplfmt: off\n\tvar  x ;  \n  // chplfmt: on"
     src = f"  while x {{\n{region}\n      var y;\n  }}\n"
@@ -197,6 +210,7 @@ def test_print_adds_user_parens() -> None:
     assert p.report.fallbacks == ["OpCall@1:9"]
 
 
+@pytest.mark.usefixtures("no_loops")
 def test_nested_tracks_indent_for_fallback() -> None:
     p, index = printer_for("while x {\ng();\n    }\n")
     (fn,) = index.children(index.roots[0])

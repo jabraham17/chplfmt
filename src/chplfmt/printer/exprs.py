@@ -27,6 +27,7 @@ from chplfmt.printer.lists import (
     ListKind,
     assignment,
     bracket_list,
+    list_fill,
     list_item,
     list_parts,
 )
@@ -309,8 +310,11 @@ def print_reduce(p: Printer, node: Node) -> Doc:
 
 
 def _literal(p: Printer, node: Node, kind: ListKind) -> Doc:
-    open_tok = p.index.structural_brackets(node)[0]
+    brackets = p.index.structural_brackets(node)
     items = p.index.children(node)
+    if not brackets:  # `[1..n, 1..m] int`: the brackets belong to the BracketLoop
+        return list_fill(p, items)
+    open_tok = brackets[0]
     spacing = p.options.bracket_spacing
     return bracket_list(p, node, open_tok, items, kind, spacing=spacing)
 

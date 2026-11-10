@@ -308,7 +308,12 @@ class Body:
         ):
             header = concat(header, self.keyword if broke else f" {self.keyword}")
             broke = False
-        if self._stmt is not None:
+        only_empty = (
+            self.source != "braces"
+            and p.options.remove_empty_statements
+            and all(isinstance(s, chapel.EmptyStmt) for s in self.stmts)
+        )
+        if self._stmt is not None and not only_empty:
             d, trail = self._stmt
             with p.nested() as n:
                 inner = concat(p.comments_after(after, first_blank=False), hardline, d)

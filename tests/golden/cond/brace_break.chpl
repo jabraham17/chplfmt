@@ -1,0 +1,18 @@
+proc f(x: int): int
+{
+  if x > 0
+  {
+    log(x);
+    return x;
+  }
+  else
+  {
+    log(-x);
+    return -x;
+  }
+}
+if a then b(); else c();
+if x then y();
+for i in D do f(i);
+for i in D { f(i); g(i); }
+if a { b(); g(); } else if c { d(); } else { e(); }
