@@ -7,7 +7,13 @@ from typing import Any
 
 import pytest
 
-from chplfmt._chapel import CHAPEL_VERSION, chapel, parse_text
+from chplfmt._chapel import (
+    CHAPEL_VERSION,
+    chapel,
+    chapel_py_dir,
+    parse_text,
+    parse_version,
+)
 
 
 def nodes(asts: list[Any], kind: type) -> list[Any]:
@@ -200,3 +206,229 @@ def test_block_style_values() -> None:
         assert [n.block_style() for n in whens] == ["implicit", "explicit"]
         # Body Blocks always say "explicit", even after `do`.
         assert {b.block_style() for b in nodes(res.asts, chapel.Block)} == {"explicit"}
+
+
+def test_chapel_py_lives_in_chpldeps() -> None:
+    home = os.environ.get("CHPL_HOME")
+    if not home:
+        pytest.skip("CHPL_HOME not set")
+    directory = chapel_py_dir(home, {}, [])
+    assert directory is not None
+    assert os.path.isfile(os.path.join(directory, "chapel", "__init__.py"))
+    if "chpl-frontend-py-deps" not in directory:  # e.g. a source build
+        assert "chpl-venv" in directory or "chpldeps" in directory, directory
+
+
+def test_no_native_parse_text_yet() -> None:
+    # When this fails, the shim starts using the real API (section 7.1).
+    if parse_version(CHAPEL_VERSION) < (2, 11, 0):  # type: ignore[operator]
+        assert not hasattr(chapel.Context(), "parse_text")
+
+
+def test_comments_in_expressions_are_dropped() -> None:
+    text = "var x = f(1, /* a */ 2);\nproc g(x: int /* b */, y) { h(/* c */); }\n"
+    with parse_text(text, "c.chpl") as res:
+        assert res.errors == []
+        assert nodes(res.asts, chapel.Comment) == []
+
+
+def test_style_info() -> None:
+    text = (
+        "var a = [1, 2,];\nvar b = [1, 2];\n"
+        "var c = a[1]; var d = f(1);\n"
+        "var s1 = 'x'; var s2 = \"x\"; var s3 = '''x'''; var s4 = \"\"\"x\"\"\";\n"
+        "var i = 0x1F;\n"
+    )
+    with parse_text(text, "s.chpl") as res:
+        assert res.errors == []
+        arrays = nodes(res.asts, chapel.Array)
+        assert [a.has_trailing_comma() for a in arrays] == [True, False]
+        calls = nodes(res.asts, chapel.FnCall)
+        assert [c.used_square_brackets() for c in calls] == [True, False]
+        strings = nodes(res.asts, chapel.StringLiteral)
+        assert [s.quote_style() for s in strings] == [
+            "'",
+            '"',
+            "'''",
+            '"""',
+        ]
+        assert "0x1F" in [n.text() for n in nodes(res.asts, chapel.IntLiteral)]
+    # has_trailing_comma exists only on arrays.
+    for kind in (chapel.Tuple, chapel.Domain, chapel.FnCall, chapel.Enum):
+        assert not hasattr(kind, "has_trailing_comma")
+
+
+def parse_errors(text: str) -> list[str]:
+    with parse_text(text, "t.chpl") as res:
+        return [d.message for d in res.errors]
+
+
+TRAILING_COMMA_LEGAL = {
+    "array": "var a = [1, 2,];",
+    "associative": "var a = [1 => 2, 3 => 4,];",
+    "domain": "var d = {1..2, 1..3,};",
+    "tuple": "var t = (1, 2,);",
+    "1-tuple": "var t = (1,);",
+    "enum": "enum E { a, b, }",
+    "tuple-decl": "var (x, y,) = (1, 2);",
+}
+TRAILING_COMMA_ILLEGAL = {
+    "call": "f(1, 2,);",
+    "index": "var x = a[1, 2,];",
+    "new": "var c = new C(1,);",
+    "formals": "proc g(x: int,) { }",
+    "with": "forall i in 1..3 with (ref a,) { }",
+    "zip": "for (i, j) in zip(1..2, 1..2,) { }",
+    "use": "use IO, Math,;",
+    "import": "import IO.{open, file,};",
+    "attribute": '@deprecated(since="1", notes="x",) proc h() { }',
+    "multi-decl": "var a = 1, b = 2,;",
+    "inheritance": "interface I { } interface J { } record R: I, J, { }",
+}
+
+
+@pytest.mark.parametrize(
+    "text", TRAILING_COMMA_LEGAL.values(), ids=TRAILING_COMMA_LEGAL
+)
+def test_trailing_comma_legal(text: str) -> None:
+    assert parse_errors(text + "\n") == []
+
+
+@pytest.mark.parametrize(
+    "text", TRAILING_COMMA_ILLEGAL.values(), ids=TRAILING_COMMA_ILLEGAL
+)
+def test_trailing_comma_illegal(text: str) -> None:
+    assert parse_errors(text + "\n") != []
+
+
+def test_one_tuple_requires_comma() -> None:
+    with parse_text("var t = (1,);\nvar u = (1);\n", "t.chpl") as res:
+        assert len(nodes(res.asts, chapel.Tuple)) == 1
+
+
+DO_BODIES = {
+    "proc": ("proc f() do return 1;", chapel.Function),
+    "iter": ("iter g() do yield 1;", chapel.Function),
+    "for": ("for i in 1..3 do f(i);", chapel.For),
+    "for-param": ("for param i in 1..3 do f(i);", chapel.For),
+    "forall": ("forall i in 1..3 do f(i);", chapel.Forall),
+    "foreach": ("foreach i in 1..3 do f(i);", chapel.Foreach),
+    "coforall": ("coforall i in 1..3 do f(i);", chapel.Coforall),
+    "while": ("while c do f();", chapel.While),
+    "if": ("if c then f();", chapel.Conditional),
+    "on": ("on here do f();", chapel.On),
+    "local": ("local do f();", chapel.Local),
+    "serial": ("serial do f();", chapel.Serial),
+    "manage": ("manage m do f();", chapel.Manage),
+    "when": ("select x { when 1 do f(); }", chapel.When),
+    "otherwise": ("select x { otherwise do f(); }", chapel.When),
+}
+
+
+@pytest.mark.parametrize(("text", "kind"), DO_BODIES.values(), ids=DO_BODIES)
+def test_do_then_bodies(text: str, kind: type) -> None:
+    with parse_text(text + "\n", "d.chpl") as res:
+        assert res.errors == []
+        [node] = nodes(res.asts, kind)
+        if kind is chapel.Conditional:
+            assert node.then_block_style() == "implicit"
+        elif kind is not chapel.Function:
+            assert node.block_style() == "implicit"
+
+
+@pytest.mark.parametrize("kw", ["begin", "sync", "defer"])
+def test_bare_or_block_statement_bodies(kw: str) -> None:
+    kind = {"begin": chapel.Begin, "sync": chapel.Sync, "defer": chapel.Defer}[kw]
+    with parse_text(f"{kw} f();\n{kw} {{ f(); }}\n", "b.chpl") as res:
+        assert res.errors == []
+        styles = [n.block_style() for n in nodes(res.asts, kind)]
+        assert styles == ["implicit", "explicit"]
+
+
+def test_cobegin_requires_block() -> None:
+    assert parse_errors("cobegin { f(); g(); }\n") == []
+    assert parse_errors("cobegin f();\n") != []
+    assert not hasattr(chapel.Cobegin, "block_style")
+
+
+def test_bracket_loops() -> None:
+    text = (
+        "[i in 1..3] f(i);\n[i in 1..3] { f(i); }\n"
+        "var a = [i in 1..3] i * 2;\nvar b: [1..3] int;\n"
+    )
+    with parse_text(text, "k.chpl") as res:
+        assert res.errors == []
+        loops = nodes(res.asts, chapel.BracketLoop)
+        assert [(n.is_expression_level(), n.block_style()) for n in loops[:2]] == [
+            (False, "implicit"),
+            (False, "explicit"),
+        ]
+        # Expression-level loops and array types have no braced body: dyno
+        # wraps the element expression in an implicit Block.
+        for n in loops[2:]:
+            assert n.is_expression_level()
+            assert n.block_style() == "implicit"
+            assert n.curly_braces_location() is None
+
+
+def test_bracket_loop_empty_block_is_an_error() -> None:
+    # `[i in D] { }` reads as a generic array type with an empty domain.
+    assert parse_errors("[i in 1..3] { }\n") != []
+    assert parse_errors("[i in 1..3] { f(i); }\n") == []
+
+
+def test_empty_statements() -> None:
+    text = "proc f() { };\nif c then ;\nfor i in 1..3 do ;\n"
+    with parse_text(text, "e.chpl") as res:
+        assert res.errors == []
+        [mod] = res.asts
+        assert [type(s).__name__ for s in mod] == [
+            "Function",
+            "EmptyStmt",
+            "Conditional",
+            "For",
+        ]
+        [cond] = nodes(res.asts, chapel.Conditional)
+        [loop] = nodes(res.asts, chapel.For)
+        for body in (cond.then_block(), loop.body()):
+            assert isinstance(body, chapel.Block)
+            assert [type(s).__name__ for s in body] == ["EmptyStmt"]
+
+
+@pytest.mark.parametrize(
+    "clauses",
+    [
+        "where x > 0 lifetime this < x, this = x, return x",
+        "lifetime this < x, this = x, return x where x > 0",
+    ],
+)
+def test_where_and_lifetime_clauses(clauses: str) -> None:
+    text = f"record R {{ proc m(x: int) {clauses} {{ }} }}\n"
+    with parse_text(text, "w.chpl") as res:
+        assert res.errors == []
+        [fn] = nodes(res.asts, chapel.Function)
+        assert fn.where_clause() is not None
+        kinds = [type(c).__name__ for c in fn.lifetime_clauses()]
+        assert kinds == ["OpCall", "OpCall", "Return"]
+        ops = [c.op() for c in fn.lifetime_clauses() if isinstance(c, chapel.OpCall)]
+        assert ops == ["<", "="]
+
+
+def test_with_clauses() -> None:
+    text = (
+        "forall i in 1..3 with (ref a) { }\ncoforall i in 1..3 with (ref a) { }\n"
+        "foreach i in 1..3 with (ref a) { }\n[i in 1..3 with (ref a)] f(i);\n"
+        "begin with (ref a) { }\ncobegin with (ref a) { f(); g(); }\n"
+        "forall i in 1..3 with(ref a) { }\n"
+    )
+    with parse_text(text, "w.chpl") as res:
+        assert res.errors == []
+        kinds = (chapel.Forall, chapel.Coforall, chapel.Foreach, chapel.BracketLoop)
+        found = [
+            n
+            for k in (*kinds, chapel.Begin, chapel.Cobegin)
+            for n in nodes(res.asts, k)
+        ]
+        assert len(found) == 7
+        assert all(n.with_clause() is not None for n in found)
+    assert hasattr(chapel.For, "with_clause")

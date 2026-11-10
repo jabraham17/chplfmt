@@ -124,6 +124,43 @@ def test_unknown_location_maps_to_logical_path() -> None:
     assert str(d) == "x.chpl: error: error reading file"
 
 
+@pytest.mark.parametrize(
+    ("path", "name"),
+    [
+        ("<stdin>", "stdin.chpl"),
+        ("", "stdin.chpl"),
+        ("dir/", "stdin.chpl"),
+        ("a/b/MyMod.chpl", "MyMod.chpl"),
+    ],
+)
+def test_parse_name(path: str, name: str) -> None:
+    assert _chapel.parse_name(path) == name
+
+
+def test_stdin_parses_under_safe_name() -> None:
+    with parse_text("var x = 1;\nproc f( {\n", "<stdin>") as res:
+        [tmp] = res.ctx.introspect_parsed_files()
+        assert os.path.basename(tmp) == "stdin.chpl"
+        assert [m.name() for m in res.asts if isinstance(m, chapel.Module)] == ["stdin"]
+        assert {d.path for d in res.diagnostics} == {"<stdin>"}
+
+
+def test_native_parse_text_gets_safe_name(tmp_path: Path) -> None:
+    made: list[NativeContext] = []
+
+    def factory() -> NativeContext:
+        made.append(NativeContext())
+        return made[-1]
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.chdir(tmp_path)
+        mp.setattr(_chapel.chapel, "Context", factory)
+        with parse_text(BAD, "<stdin>") as res:
+            paths = {d.path for d in res.diagnostics}
+    assert [c.calls for c in made] == [[("stdin.chpl", BAD)]]
+    assert paths == {"<stdin>"}
+
+
 @pytest.mark.parametrize("text", ["var x = 1;\nproc f() { }\n", BAD, "\tvar y;\r\n"])
 def test_native_parse_text_matches_temp_file(tmp_path: Path, text: str) -> None:
     logical = str(tmp_path / "same.chpl")

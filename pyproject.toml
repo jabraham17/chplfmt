@@ -56,4 +56,7 @@ venv = ".venv"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["-ra"]
-markers = ["corpus: property tests over the Chapel corpus (slow)"]
+markers = [
+  "corpus: property tests over the Chapel corpus (slow)",
+  "perf: performance smoke tests (timing-sensitive)",
+]

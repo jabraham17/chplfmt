@@ -1,6 +1,10 @@
 import time
 
+import pytest
+
 from chplfmt.api import format_text
+
+pytestmark = pytest.mark.perf
 
 _UNIT = """\
 // Helper {i}: computes a value.

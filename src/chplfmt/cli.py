@@ -36,6 +36,8 @@ EXIT_CHANGED = 1
 EXIT_USAGE = 2
 EXIT_PARSE = 3
 EXIT_INTERNAL = 4
+EXIT_INTERRUPTED = 130  # 128 + SIGINT
+EXIT_BROKEN_PIPE = 141  # 128 + SIGPIPE
 
 STDIN_PATH = "<stdin>"
 
@@ -302,6 +304,20 @@ def _run_lsp() -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    try:
+        return _main(argv)
+    except BrokenPipeError:
+        # The reader went away (`chplfmt f.chpl | head`): stop quietly, and keep
+        # the interpreter's final flush from failing again.
+        with contextlib.suppress(OSError, ValueError, AttributeError):
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+        return EXIT_BROKEN_PIPE
+    except KeyboardInterrupt:
+        return EXIT_INTERRUPTED
+
+
+def _main(argv: Sequence[str] | None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
     cwd = os.getcwd()
     try:

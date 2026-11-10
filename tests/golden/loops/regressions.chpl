@@ -4,3 +4,8 @@ proc f(arr) {
   var B: [arr.domain.dim(0).lowBound..#(rows*factor), arr.domain.dim(1).lowBound..#(cols*factor)] arr.eltType;
   return B;
 }
+
+// Statement-level bracket loops whose body is only empty statements keep one:
+// `[i in D] { }` would parse as an array type.
+[i in 1..3] ;
+[i in 1..3] { ; }

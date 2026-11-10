@@ -184,6 +184,13 @@ def create_server() -> ChplfmtServer:
     ) -> list[lsp.TextEdit] | None:
         return ls.run_format(params.text_document.uri, params.range)
 
+    @server.feature(lsp.TEXT_DOCUMENT_DID_CLOSE)
+    def _did_close(  # pyright: ignore[reportUnusedFunction]
+        ls: ChplfmtServer, params: lsp.DidCloseTextDocumentParams
+    ) -> None:
+        uri = params.text_document.uri
+        ls.reported = {key for key in ls.reported if key[0] != uri}
+
     return server
 
 

@@ -5,6 +5,8 @@ WithClause is printed by `stmts`.
 
 from __future__ import annotations
 
+import dataclasses
+
 from chplfmt._chapel import chapel
 from chplfmt.doc import EMPTY, Doc, concat, flat_width, hardline, text
 from chplfmt.printer.body import Body, fits
@@ -134,9 +136,16 @@ def print_bracket_loop(p: Printer, node: Node) -> Doc | None:
     if p.tokens[first].text != "[" or close is None:
         return None
     mode = "preserve" if node.is_expression_level() else None
-    b = Body(p, node, close, block=node.body(), form="bare", mode=mode)
-    head, broke = keyword_header(p, node, first, close, node.iterand())
-    return with_attributes(p, node, b.doc(head, broke))
+    options = p.options
+    if mode is None and all(isinstance(s, chapel.EmptyStmt) for s in node.body()):
+        # `[i in D] { }` reads as a generic array type: keep the `;`.
+        p.options = dataclasses.replace(options, remove_empty_statements=False)
+    try:
+        b = Body(p, node, close, block=node.body(), form="bare", mode=mode)
+        head, broke = keyword_header(p, node, first, close, node.iterand())
+        return with_attributes(p, node, b.doc(head, broke))
+    finally:
+        p.options = options
 
 
 @printer(chapel.While)

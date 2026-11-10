@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # weekly, with the full corpus
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FORCE_COLOR: "1"
+  # Pull requests use the sampled corpus for the per-profile properties.
+  CHPLFMT_FULL_CORPUS: ${{ github.event_name != 'pull_request' && '1' || '0' }}
+  # Cap on files taken from $CHPL_HOME/test, when the image has it.
+  CHPLFMT_CORPUS_TEST_MAX: "4000"
+
+jobs:
+  images:
+    name: Resolve image digests
+    runs-on: ubuntu-latest
+    outputs:
+      digests: ${{ steps.resolve.outputs.digests }}
+    steps:
+      - id: resolve
+        run: |
+          json="{}"
+          for tag in 2.10.0 latest nightly; do
+            digest=$(docker buildx imagetools inspect "chapel/chapel:$tag" \
+              --format '{{json .Manifest}}' | jq -r .digest)
+            echo "chapel/chapel:$tag -> $digest"
+            json=$(jq -c --arg t "$tag" --arg d "$digest" '. + {($t): $d}' <<<"$json")
+          done
+          echo "digests=$json" >> "$GITHUB_OUTPUT"
+
+  lint:
+    name: Lint and type check
+    needs: images
+    runs-on: ubuntu-latest
+    container:
+      image: chapel/chapel:latest
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          python: "3"
+          image-digest: ${{ fromJSON(needs.images.outputs.digests).latest }}
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pyright
+
+  test:
+    name: Tests (Chapel ${{ matrix.chapel }}, Python ${{ matrix.python }})
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        chapel: ["2.10.0", latest, nightly]
+        python: ["3.12", "3"] # minimum supported and latest 3.x
+    container:
+      image: chapel/chapel:${{ matrix.chapel }}
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          python: ${{ matrix.python }}
+          image-digest: ${{ fromJSON(needs.images.outputs.digests)[matrix.chapel] }}
+      - name: Unit tests
+        run: python -m pytest -q -n 4 -m "not corpus and not perf" tests/unit
+      - name: Golden and option tests
+        run: python -m pytest -q -n 4 tests/golden tests/options
+
+  corpus:
+    name: Corpus ${{ matrix.shard }}/3 (Chapel ${{ matrix.chapel }}, Python ${{ matrix.python }})
+    needs: [images, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        chapel: ["2.10.0", latest, nightly]
+        python: ["3.12", "3"]
+        shard: [1, 2, 3]
+    container:
+      image: chapel/chapel:${{ matrix.chapel }}
+      options: --user root
+    env:
+      CHPLFMT_SHARD: ${{ matrix.shard }}/3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          python: ${{ matrix.python }}
+          image-digest: ${{ fromJSON(needs.images.outputs.digests)[matrix.chapel] }}
+      - name: Corpus
+        run: |
+          echo "CHPL_HOME=$CHPL_HOME"
+          ls -d "$CHPL_HOME/modules" "$CHPL_HOME/test" 2>/dev/null || true
+      - name: Corpus properties
+        run: >
+          python -m pytest -q -n 4 -m corpus tests/properties
+          --ignore=tests/properties/test_corpus_coverage.py
+      - name: Coverage gate (no printer fallbacks)
+        run: python -m pytest -q -n 4 tests/properties/test_corpus_coverage.py
+      - name: Performance smoke test
+        if: matrix.shard == 1
+        run: python -m pytest -q -s -m perf tests/unit

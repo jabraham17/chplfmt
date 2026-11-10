@@ -289,6 +289,17 @@ def map_diagnostics(
     return result
 
 
+DEFAULT_PARSE_NAME = "stdin.chpl"
+
+
+def parse_name(path: str) -> str:
+    """File name to parse under: the basename of `path`, or a safe default."""
+    name = os.path.basename(path)
+    if not name or name.startswith("<") or name in (".", ".."):
+        return DEFAULT_PARSE_NAME
+    return name
+
+
 @contextmanager
 def parse_text(text: str, path: str) -> Generator[ParseResult]:
     """Parse `text` as if it were the file at `path`."""
@@ -296,13 +307,15 @@ def parse_text(text: str, path: str) -> Generator[ParseResult]:
     native: Callable[[str, str], list[chapel.AstNode]] | None = getattr(
         ctx, "parse_text", None
     )
+    name = parse_name(path)
     if native is not None:
+        native_path = path if name == os.path.basename(path) else name
         with ctx.track_errors() as errs:
-            asts = native(path, text)
-        yield ParseResult(ctx, asts, map_diagnostics(_errors(errs), path))
+            asts = native(native_path, text)
+        yield ParseResult(ctx, asts, map_diagnostics(_errors(errs), path, native_path))
         return
     with tempfile.TemporaryDirectory(prefix="chplfmt-") as d:
-        tmp = os.path.join(d, os.path.basename(path) or "input.chpl")
+        tmp = os.path.join(d, name)
         with open(tmp, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         with ctx.track_errors() as errs:

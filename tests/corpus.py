@@ -29,9 +29,48 @@ def corpus_roots() -> list[Path]:
     return [d for d in (home / "modules", home / "test") if d.is_dir()]
 
 
+def _hash(path: Path) -> str:
+    home = chpl_home()
+    rel = path.relative_to(home) if home is not None else path
+    return hashlib.sha256(str(rel).encode()).hexdigest()
+
+
+def shard() -> tuple[int, int]:
+    """`CHPLFMT_SHARD=k/n` (1-based) selects one of `n` disjoint corpus slices."""
+    spec = os.environ.get("CHPLFMT_SHARD", "1/1")
+    k, _, n = spec.partition("/")
+    k_i, n_i = int(k), int(n or "1")
+    if not 1 <= k_i <= n_i:
+        raise ValueError(f"invalid CHPLFMT_SHARD={spec!r} (expected k/n, 1<=k<=n)")
+    return k_i, n_i
+
+
+def in_shard(path: Path) -> bool:
+    k, n = shard()
+    return n == 1 or int(_hash(path), 16) % n == k - 1
+
+
+def corpus_test_limit() -> int | None:
+    """`CHPLFMT_CORPUS_TEST_MAX`: at most this many files from `$CHPL_HOME/test`."""
+    value = os.environ.get("CHPLFMT_CORPUS_TEST_MAX")
+    return int(value) if value else None
+
+
 def corpus_files() -> list[Path]:
-    """Every `.chpl` file under the corpus roots, sorted."""
-    return sorted(p for root in corpus_roots() for p in root.rglob("*.chpl"))
+    """Every `.chpl` file under the corpus roots in this shard, sorted.
+
+    Files from `$CHPL_HOME/test` are capped at `corpus_test_limit()` (chosen by a
+    stable hash); unparseable ones are skipped by `parsed()`.
+    """
+    home = chpl_home()
+    limit = corpus_test_limit()
+    files: list[Path] = []
+    for root in corpus_roots():
+        found = list(root.rglob("*.chpl"))
+        if home is not None and root == home / "test" and limit is not None:
+            found = sorted(found, key=_hash)[:limit]
+        files += found
+    return sorted(p for p in files if in_shard(p))
 
 
 def corpus_params() -> list[object]:
@@ -61,10 +100,10 @@ def sample_files(pinned: Iterable[str] = ()) -> list[Path]:
     files = corpus_files()
     if home is None or not files or full_corpus():
         return files
-    pins = [home / r for r in pinned if (home / r).is_file()]
+    pins = [home / r for r in pinned if (home / r).is_file() and in_shard(home / r)]
     by_hash = sorted(
         (p for p in files if p not in pins and p.stat().st_size <= SAMPLE_MAX_BYTES),
-        key=lambda p: hashlib.sha256(str(p.relative_to(home)).encode()).hexdigest(),
+        key=_hash,
     )
     return sorted([*pins, *by_hash[:SAMPLE_SIZE]])
 

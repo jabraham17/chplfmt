@@ -344,6 +344,47 @@ def test_python_m(tmp_path: Path) -> None:
     assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
 
 
+def test_broken_pipe_exits_quietly(tmp_path: Path) -> None:
+    write("big.chpl", "".join(f"var x{i} = {i};\n" for i in range(12000)))
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "chplfmt", "big.chpl"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=tmp_path,
+    )
+    assert proc.stdout is not None and proc.stderr is not None
+    assert proc.stdout.readline() == b"var x0 = 0;\n"
+    proc.stdout.close()
+    err = proc.stderr.read()
+    assert (proc.wait(timeout=60), err) == (141, b"")
+
+
+def test_broken_pipe_in_process(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    write("a.chpl")
+
+    class Closed:
+        def write(self, _: str) -> int:
+            raise BrokenPipeError
+
+        def flush(self) -> None:
+            raise BrokenPipeError
+
+    monkeypatch.setattr(sys, "stdout", Closed())
+    assert main(["a.chpl"]) == 141
+    assert capsys.readouterr().err == ""
+
+
+def test_keyboard_interrupt(monkeypatch: pytest.MonkeyPatch, capsys: Any) -> None:
+    write("a.chpl")
+
+    def interrupt(*_: Any, **__: Any) -> api.FormatResult:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(api, "format_text", interrupt)
+    assert main(["a.chpl"]) == 130
+    assert capsys.readouterr() == ("", "")
+
+
 # End to end with the real formatter
 
 MESSY = "\n  var a = 1;  \r\n\r\n\r\n\r\n//b\r\nvar c;"

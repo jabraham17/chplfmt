@@ -204,6 +204,9 @@ class Session:
         self.client.text_document_did_open(lsp.DidOpenTextDocumentParams(item))
         return lsp.TextDocumentIdentifier(uri)
 
+    def close_doc(self, doc: lsp.TextDocumentIdentifier) -> None:
+        self.client.text_document_did_close(lsp.DidCloseTextDocumentParams(doc))
+
     def change(self, doc: lsp.TextDocumentIdentifier, text: str) -> None:
         self.versions[doc.uri] += 1
         ident = lsp.VersionedTextDocumentIdentifier(self.versions[doc.uri], doc.uri)
@@ -339,5 +342,11 @@ def test_internal_error_shown_once_per_version(tmp_path: Path) -> None:
         assert s.format(doc) in (None, [])
         s.settle()
         assert len(s.client.shown) == 2
+        # Reopening restarts at version 1, which must be reported again.
+        s.close_doc(doc)
+        doc = s.open("d.chpl", MESSY)
+        assert s.format(doc) in (None, [])
+        s.settle()
+        assert len(s.client.shown) == 3
     finally:
         s.close()
