@@ -147,9 +147,7 @@ class Body:
         self.source: Kind = (
             "braces"
             if self.open_tok is not None
-            else "keyword"
-            if kw_tok is not None
-            else "bare"
+            else "keyword" if kw_tok is not None else "bare"
         )
         self._stmt: tuple[Doc, Doc] | None = None
         self._kind: Kind | None = None

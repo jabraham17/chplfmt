@@ -91,9 +91,9 @@ def test_profile(options: FormatOptions, path: Path) -> None:
         text = source.text
     # format_text runs the verifier.
     once = api.format_text(text, path=str(path), options=options).text
-    assert api.format_text(once, path=str(path), options=options).text == once, (
-        "not idempotent"
-    )
+    assert (
+        api.format_text(once, path=str(path), options=options).text == once
+    ), "not idempotent"
     lines = once.split("\n")
     bad = [
         f"{n}: {lines[n - 1]}"

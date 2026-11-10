@@ -111,7 +111,7 @@ workspace root) and is meant to run next to chpl-language-server.
 ```sh
 uv venv --python 3.12 .venv
 uv pip install --python .venv -e '.[dev]'
-.venv/bin/ruff check . && .venv/bin/ruff format --check . && .venv/bin/pyright
+.venv/bin/ruff check . && .venv/bin/black --check . && .venv/bin/pyright
 .venv/bin/python -m pytest -n 4 -m "not corpus"   # fast tests
 .venv/bin/python -m pytest -n 4                   # include corpus properties
 ```

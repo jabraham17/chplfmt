@@ -280,10 +280,16 @@ def _steps(cls: type, ignored: frozenset[str]) -> tuple[tuple[_Step, ...], bool,
 
 
 def _actual_names(node: chapel.FnCall | chapel.Attribute) -> tuple[str | None, ...]:
-    actuals = cast(Iterable[object], node.actuals())  # pyright: ignore[reportUnknownMemberType]
+    actuals = cast(
+        Iterable[object],
+        node.actuals(),  # pyright: ignore[reportUnknownMemberType]
+    )
     names: list[str | None] = []
     for a in actuals:
-        names.append(cast(str, a[0]) if isinstance(a, tuple) else None)  # pyright: ignore[reportUnknownArgumentType]
+        if isinstance(a, tuple):
+            names.append(cast(str, a[0]))  # pyright: ignore[reportUnknownArgumentType]
+        else:
+            names.append(None)
     return tuple(names)
 
 

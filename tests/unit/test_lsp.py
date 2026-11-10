@@ -133,11 +133,15 @@ class Client(BaseLanguageClient):
         self.shown: list[lsp.ShowMessageParams] = []
 
         @self.feature(lsp.WINDOW_LOG_MESSAGE)
-        def _log(params: lsp.LogMessageParams) -> None:  # pyright: ignore[reportUnusedFunction]
+        def _log(
+            params: lsp.LogMessageParams,
+        ) -> None:  # pyright: ignore[reportUnusedFunction]
             self.logs.append(params)
 
         @self.feature(lsp.WINDOW_SHOW_MESSAGE)
-        def _show(params: lsp.ShowMessageParams) -> None:  # pyright: ignore[reportUnusedFunction]
+        def _show(
+            params: lsp.ShowMessageParams,
+        ) -> None:  # pyright: ignore[reportUnusedFunction]
             self.shown.append(params)
 
 
@@ -320,15 +324,13 @@ def test_config_error(tmp_path: Path, cfg: str) -> None:
 
 
 def test_internal_error_shown_once_per_version(tmp_path: Path) -> None:
-    preamble = textwrap.dedent(
-        """
+    preamble = textwrap.dedent("""
         import chplfmt.lsp
         from chplfmt.errors import VerificationError
         def boom(*args, **kwargs):
             raise VerificationError("x.chpl", "tokens", (1, 1), (1, 1))
         chplfmt.lsp.format_text = boom
-        """
-    )
+        """)
     s = Session(tmp_path, preamble)
     try:
         doc = s.open("d.chpl", MESSY)

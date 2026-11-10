@@ -54,7 +54,7 @@ jobs:
           python: "3"
           image-digest: ${{ fromJSON(needs.images.outputs.digests).latest }}
       - run: ruff check .
-      - run: ruff format --check .
+      - run: black --check .
       - run: pyright
 
   test:

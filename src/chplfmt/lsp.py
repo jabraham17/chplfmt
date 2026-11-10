@@ -134,7 +134,9 @@ class ChplfmtServer(LanguageServer):
         key = (doc.uri, doc.version)
         if key not in self.reported:
             self.reported.add(key)
-            self.show_message(message, lsp.MessageType.Error)  # pyright: ignore[reportUnknownMemberType]
+            self.show_message(  # pyright: ignore[reportUnknownMemberType]
+                message, lsp.MessageType.Error
+            )
 
     def run_format(
         self, uri: str, rng: lsp.Range | None = None

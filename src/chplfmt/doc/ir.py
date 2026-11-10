@@ -371,11 +371,7 @@ def _dump(d: Doc, depth: int, out: list[str]) -> None:
             name = (
                 "literalline"
                 if literal
-                else "hardline"
-                if hard
-                else "softline"
-                if soft
-                else "line"
+                else "hardline" if hard else "softline" if soft else "line"
             )
             out.append(pad + name)
         case Concat(parts) | Fill(parts):

@@ -264,9 +264,11 @@ def print_block_stmt(p: Printer, node: Node) -> Doc | None:
     form: Form = (
         "block"
         if isinstance(node, chapel.Cobegin)
-        else "bare"
-        if isinstance(node, chapel.Begin | chapel.Sync | chapel.Defer)
-        else "keyword"
+        else (
+            "bare"
+            if isinstance(node, chapel.Begin | chapel.Sync | chapel.Defer)
+            else "keyword"
+        )
     )
     return with_attributes(p, node, Body(p, node, hl, form=form).doc(header, broke))
 
