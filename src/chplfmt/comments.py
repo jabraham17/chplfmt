@@ -6,9 +6,10 @@ and 8.13 (no trailing whitespace, LF line endings).
 
 from __future__ import annotations
 
-import unicodedata
-
+from chplfmt.rules.comment_spacing import apply as space_line_comment
 from chplfmt.source import char_width
+
+__all__ = ["expand_tabs", "expected_comment_text", "space_line_comment"]
 
 _TRAILING_WS = " \t\f\r"
 
@@ -28,18 +29,6 @@ def expand_tabs(text: str, start_col: int, tab_size: int) -> str:
         out.append(ch)
         col = 0 if ch == "\n" else col + char_width(ch)
     return "".join(out)
-
-
-def _is_letter_or_digit(ch: str) -> bool:
-    category = unicodedata.category(ch)
-    return category[0] == "L" or category == "Nd"
-
-
-def space_line_comment(text: str) -> str:
-    """`//x` -> `// x` when `x` is a letter or digit; anything else is unchanged."""
-    if text.startswith("//") and len(text) > 2 and _is_letter_or_digit(text[2]):
-        return "// " + text[2:]
-    return text
 
 
 def _shift(line: str, shift: int) -> str:

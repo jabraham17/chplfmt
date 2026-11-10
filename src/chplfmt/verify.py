@@ -1,8 +1,8 @@
 """Verifier (section 7.9): the output must mean exactly what the input meant.
 
 Checks, in order: `reparse`, `ast`, `tokens`, `comments`, `verbatim`. Each
-rule contributes a `Normalization` describing what it may change; the
-verifier applies the enabled ones to both sides before comparing.
+rule (`chplfmt.rules`) describes what it may change; the verifier applies the
+enabled ones to both sides before comparing.
 """
 
 from __future__ import annotations
@@ -18,8 +18,9 @@ from chplfmt._chapel import ParseResult, chapel, parse_text
 from chplfmt.comments import expected_comment_text
 from chplfmt.config import FormatOptions
 from chplfmt.errors import VerificationError
-from chplfmt.lexer import LexError, TokenKind
+from chplfmt.lexer import LexError
 from chplfmt.offregions import verbatim_spans
+from chplfmt.rules import RULES
 from chplfmt.source import Pos, SourceText
 from chplfmt.tokens import Node, TokenIndex, children
 
@@ -233,128 +234,6 @@ NO_OWN_ATTRS = frozenset(
         *("Literal", "Match", "MatchCase", "MultiDecl", "Record", "StringLiteral"),
         *("Sync", "TaskVar", "Tuple", "TypeDecl", "TypeQuery", "Union", "Zip"),
     }
-)
-
-_STATEMENT_BODIES = (
-    chapel.Function,
-    chapel.While,
-    chapel.IndexableLoop,
-    chapel.Conditional,
-    chapel.When,
-    chapel.On,
-    chapel.Local,
-    chapel.Serial,
-    chapel.Manage,
-    chapel.Begin,
-    chapel.Sync,
-    chapel.Defer,
-)
-
-
-# Rule normalizations
-
-
-def body_delimiter_tokens(index: TokenIndex) -> set[int]:
-    """`{`/`}` and `do`/`then` of bodies the single-statement-body rule rewrites."""
-    found: set[int] = set()
-    for node in index.nodes():
-        if isinstance(node, _STATEMENT_BODIES) or (
-            isinstance(node, chapel.Block)
-            and isinstance(index.parent(node), _STATEMENT_BODIES)
-        ):
-            found.update(index.body_delimiters(node))
-    return found
-
-
-def user_paren_tokens(index: TokenIndex) -> set[int]:
-    found: set[int] = set()
-    # Only nodes owning a `(` can have user parentheses.
-    owners = {
-        index.owner(i)
-        for i, t in enumerate(index.tokens)
-        if t.text == "(" and t.kind is TokenKind.PUNCT
-    }
-    for node in owners:
-        if node is None:
-            continue
-        for i, j, _ in index.user_parens(node):
-            found.update((i, j))
-    return found
-
-
-def trailing_comma_tokens(index: TokenIndex) -> set[int]:
-    """Trailing commas where they are legal and optional (not in 1-tuples)."""
-    found: set[int] = set()
-    for node in index.nodes():
-        if isinstance(node, chapel.Tuple) and node.num_actuals() == 1:
-            continue
-        if isinstance(node, chapel.TupleDecl) and sum(1 for _ in node.decls()) == 1:
-            continue
-        if not isinstance(
-            node,
-            (chapel.Array, chapel.Domain, chapel.Tuple, chapel.TupleDecl, chapel.Enum),
-        ):
-            continue
-        for open_ in index.structural_brackets(node):
-            close = index.tokens[open_].match
-            prev = None if close is None else index.prev_code(close)
-            if (
-                prev is not None
-                and prev > open_
-                and index.tokens[prev].text == ","
-                and index.owner(prev) == node
-            ):
-                found.add(prev)
-    return found
-
-
-def empty_stmt_tokens(index: TokenIndex) -> set[int]:
-    found: set[int] = set()
-    for node in index.nodes():
-        if isinstance(node, chapel.EmptyStmt) and (sp := index.node_span(node)):
-            found.update(range(sp[0], sp[1] + 1))
-    return found
-
-
-def _no_tokens(index: TokenIndex) -> set[int]:
-    return set()
-
-
-@dataclass(frozen=True)
-class Normalization:
-    """What one rule may change; applied to both input and output when enabled."""
-
-    option: str
-    enabled: Callable[[FormatOptions], bool]
-    removable_tokens: Callable[[TokenIndex], set[int]] = _no_tokens
-    ignored_attrs: frozenset[str] = frozenset()
-    drops_empty_stmts: bool = False
-
-
-NORMALIZATIONS: tuple[Normalization, ...] = (
-    Normalization(
-        "single-statement-body",
-        lambda o: o.single_statement_body != "preserve",
-        body_delimiter_tokens,
-        frozenset({"block_style", "then_block_style", "else_block_style"}),
-    ),
-    Normalization(
-        "remove-redundant-parens",
-        lambda o: o.remove_redundant_parens,
-        user_paren_tokens,
-    ),
-    Normalization(
-        "trailing-comma",
-        lambda o: o.trailing_comma,
-        trailing_comma_tokens,
-        frozenset({"has_trailing_comma"}),
-    ),
-    Normalization(
-        "remove-empty-statements",
-        lambda o: o.remove_empty_statements,
-        empty_stmt_tokens,
-        drops_empty_stmts=True,
-    ),
 )
 
 
@@ -573,7 +452,7 @@ class _Verifier:
         self.options = options
         self.ia = a
         self.ib = b
-        rules = [n for n in NORMALIZATIONS if n.enabled(options)]
+        rules = [r for r in RULES if r.enabled(options)]
         self.ignore = _Ignore(
             frozenset[str]().union(*(n.ignored_attrs for n in rules)),
             any(n.drops_empty_stmts for n in rules),

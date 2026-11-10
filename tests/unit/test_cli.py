@@ -129,6 +129,21 @@ def test_check_verbose(capsys: Any) -> None:
     assert err == "would reformat a.chpl\n  changed lines: 1, 3-4\n"
 
 
+def test_check_verbose_rule_counts(capsys: Any) -> None:
+    write(
+        "a.chpl",
+        "//x\nvar a = (1);;\nvar t = (1, 2,);\nif a then { f(); }\n"
+        "x = ((a + 1)) * 2;\n",
+    )
+    assert main(["--check", "-v", "a.chpl"]) == 1
+    assert capsys.readouterr().err == (
+        "would reformat a.chpl\n"
+        "  changed lines: 1-5\n"
+        "  rule applications: comment-spacing: 1, remove-empty-statements: 1, "
+        "remove-redundant-parens: 2, single-statement-body: 1, trailing-comma: 1\n"
+    )
+
+
 @pytest.mark.usefixtures("uppercase")
 def test_diff(capsys: Any) -> None:
     write("a.chpl", "var a = 1;\n")

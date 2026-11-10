@@ -202,10 +202,13 @@ def test_print_adds_user_parens() -> None:
         assert init is not None
         return concat("var ", node.name(), " = ", p.print(init), ";")
 
-    p, _ = printer_for("var x = ((1));\n", registry={chapel.Variable: print_var})
-    assert _render(p) == "var x = ((1));\n"
+    reg: dict[type, Any] = {chapel.Variable: print_var}
+    p, index = printer_for("var x = ((1));\n", registry=reg)
+    assert _render(p) == "var x = 1;\n"
+    opts = FormatOptions(remove_redundant_parens=False)
+    assert _render(Printer(index, opts, registry=reg)) == "var x = ((1));\n"
     # An expression's fallback doesn't take the statement's `;`.
-    p, _ = printer_for("var x = 1 +\n  2;\n", registry={chapel.Variable: print_var})
+    p, _ = printer_for("var x = 1 +\n  2;\n", registry=reg)
     assert _render(p) == "var x = 1 +\n  2;\n"
     assert p.report.fallbacks == ["OpCall@1:9"]
 

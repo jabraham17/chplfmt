@@ -26,13 +26,13 @@ coforall loc in Locales {
 }
 foreach i in D with (ref acc) do acc += i;
 while x < 3 do x += 1;
-while (x < 3) do x += 1;
+while x < 3 do x += 1;
 do {
   x += 1;
 } while x < 10;
 do {
   x += 1;
-} while (x < 10 && y);
+} while x < 10 && y;
 label outer for i in 1..n {
   for j in 1..n {
     if j == i then continue outer;

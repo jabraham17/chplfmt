@@ -39,6 +39,7 @@ from chplfmt.offregions import (
     find_off_regions,
     is_statement_list,
 )
+from chplfmt.rules import redundant_parens
 from chplfmt.source import display_width
 from chplfmt.tokens import Node, Span, TokenIndex
 from chplfmt.trivia import Attachment, Comment, Key, Placement, attach
@@ -141,6 +142,8 @@ class Printer:
         # Output column where the last `print`ed node ended, if known.
         self.end_col: int | None = None
         self._dispatch: dict[type, PrintFn | None] = {}
+        # Token indices of user parentheses dropped by remove-redundant-parens.
+        self.removed_parens: set[int] = set()
 
     # Bookkeeping
 
@@ -206,11 +209,13 @@ class Printer:
             if self.keep_parens(node, layer, depth):
                 d = concat("(", align(d) if aligns_in_parens(node) else d, ")")
                 self.end_col = None
+            else:
+                self.removed_parens.update(layer)
         return d
 
     def keep_parens(self, node: Node, layer: tuple[int, int], depth: int) -> bool:
-        """Whether one layer of user parentheses stays (M6: the rule decides)."""
-        return True
+        """Whether one layer of user parentheses stays (remove-redundant-parens)."""
+        return redundant_parens.keep(self, node, layer, depth)
 
     # Comments (section 7.5). Each helper marks what it returns as emitted.
 

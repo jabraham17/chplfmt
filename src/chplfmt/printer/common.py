@@ -20,7 +20,7 @@ SPACE_BEFORE_OPEN = frozenset(
     {":", "=", ",", "where", "lifetime", "return", "proc", "iter", "operator", "ref"}
     | {"const", "param", "type"}
     | {"for", "forall", "foreach", "coforall", "in", "if", "while", "with"}
-    | {"then", "else", "do"}
+    | {"then", "else", "do", "try", "try!"}
 )
 
 
@@ -102,6 +102,8 @@ def tokens_doc(
         kid = kids.get(i)
         if kid is not None:
             d, head, tail = p.print(kid[0]), tokens[i].text, tokens[kid[1]].text
+            if p.removed_parens:
+                head, tail = _visible_ends(p, i, kid[1])
             now_broke = ends_line(p.trivia.trailing(kid[0]))
             i = kid[1] + 1
         else:
@@ -123,6 +125,7 @@ def tokens_doc(
             and not broke
             and (
                 prev == " "
+                or (_is_word(prev[-1:]) and _is_word(head[:1]))
                 or (head in ("(", "[") and prev in SPACE_BEFORE_OPEN)
                 or (head == ":" and prev == "operator")
                 or not (
@@ -138,6 +141,20 @@ def tokens_doc(
         prev = tail
         broke = now_broke
     return concat(*parts), broke
+
+
+def _is_word(c: str) -> bool:
+    return c.isalnum() or c in "_$"
+
+
+def _visible_ends(p: Printer, first: int, last: int) -> tuple[str, str]:
+    """Texts of the first and last tokens in `first..last` that are printed."""
+    gone = p.removed_parens
+    while first < last and first in gone:
+        first += 1
+    while last > first and last in gone:
+        last -= 1
+    return p.tokens[first].text, p.tokens[last].text
 
 
 def semicolon(p: Printer, node: Node, doc: Doc) -> Doc:

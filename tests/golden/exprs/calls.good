@@ -23,7 +23,7 @@ var sh: shared C;
 var bo: borrowed C?;
 var z = index(D);
 var zz: sparse subdomain(D);
-var ow = owned (C);
+var ow = owned C;
 
 // new
 var f1 = new C(1, 2);

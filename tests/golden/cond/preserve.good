@@ -53,7 +53,7 @@ if const z = h() then useIt(z);
 if a then ;
 if a then ; else b();
 if x then f(); else g();
-if (a) then b();
+if a then b();
 proc g() {
   if a then return 1; else return 2;
   if cond then

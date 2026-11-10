@@ -58,8 +58,8 @@ proc parens() {
                scale == 8 || scale == 16 || scale == 32);
   const mixed = (alphaValue + betaValue + gammaValue + deltaValue +
                  epsilonValue) * scaleFactorValue;
-  const sum = (alphaValue + betaValue + gammaValue + deltaValue + epsilonValue +
-               zetaValue);
+  const sum = alphaValue + betaValue + gammaValue + deltaValue + epsilonValue +
+              zetaValue;
 }
 
 proc exprIf() {

@@ -81,8 +81,8 @@ proc parens() {
                scale == 8 || scale == 16 || scale == 32);
   const mixed = (alphaValue + betaValue + gammaValue + deltaValue +
                  epsilonValue) * scaleFactorValue;
-  return (alphaValue + betaValue + gammaValue + deltaValue + epsilonValue +
-          zetaValue);
+  return alphaValue + betaValue + gammaValue + deltaValue + epsilonValue +
+         zetaValue;
 }
 
 // Expression-level if

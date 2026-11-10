@@ -84,7 +84,7 @@ if x {
 } else {
   g();
 }
-if (a) {
+if a {
   b();
 }
 proc g() {
