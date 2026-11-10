@@ -138,9 +138,8 @@ class Body:
         )
         cands = p.dangling(owner)
         if self.block is not owner:
-            done = set(p.emitted)
             cands += p.dangling(self.block)
-            cands += [c for c in p.trivia.leading(self.block) if c.token not in done]
+            cands += p.unemitted(p.trivia.leading(self.block))
         self.pre = sorted(
             {c.token: c for c in cands if header_last < c.token < self.last}.values(),
             key=lambda c: c.token,

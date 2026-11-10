@@ -56,8 +56,7 @@ def _in_chain(p: Printer, node: Node) -> bool:
 
 def _between(p: Printer, node: Node, blk: Node, lo: int, hi: int) -> list[Comment]:
     cs = [*p.dangling(node), *p.dangling(blk)]
-    done = set(p.emitted)
-    cs += [c for c in p.trivia.leading(blk) if c.token not in done]
+    cs += p.unemitted(p.trivia.leading(blk))
     return sorted(
         {c.token: c for c in cs if lo < c.token < hi}.values(), key=lambda c: c.token
     )

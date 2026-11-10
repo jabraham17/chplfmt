@@ -124,6 +124,7 @@ class TokenIndex:
         self._owner: list[Node | None] = [None] * len(self.tokens)
         self._structural: dict[Node, list[int]] = {}
         self._user_parens: dict[Node, list[tuple[int, int, Node]]] = {}
+        self._parens_around: dict[Node, list[tuple[int, int]]] = {}
         # Spans that couldn't be reconciled (overlapping siblings); empty normally.
         self.problems: list[str] = []
         self._compute_spans()
@@ -547,13 +548,18 @@ class TokenIndex:
 
     def parens_around(self, node: Node) -> list[tuple[int, int]]:
         """User parentheses around `node`, innermost first."""
+        cached = self._parens_around.get(node)
+        if cached is not None:
+            return cached
         parent = self._parent.get(node)
         while isinstance(parent, chapel.Block) and parent not in self._from_curly:
             parent = self._parent.get(parent)
         if parent is None:
             return []
         layers = [(i, j) for i, j, kid in self.user_parens(parent) if kid == node]
-        return sorted(layers, reverse=True)
+        layers.sort(reverse=True)
+        self._parens_around[node] = layers
+        return layers
 
     def unexplained_brackets(self, node: Node) -> list[int]:
         """Own brackets that are neither structural nor user parentheses."""

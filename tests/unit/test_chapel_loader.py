@@ -178,6 +178,50 @@ def test_load_sets_chpl_home_for_context(clean_env: pytest.MonkeyPatch) -> None:
     assert len(run.calls) == 1
 
 
+def _module_at(path: Path) -> ModuleType:
+    path.parent.mkdir(parents=True)
+    path.write_text("")
+    module = fake_chapel()
+    module.__file__ = str(path)
+    return module
+
+
+def test_load_derives_chpl_home_from_module_path(
+    clean_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home, _ = make_chpl_home(tmp_path / "home")
+    module = _module_at(home / "third-party" / "chpl-venv" / "chapel" / "__init__.py")
+    run = FakeRun(BOOTSTRAP)
+    clean_env.setattr(_chapel.subprocess, "run", run)
+    clean_env.setattr(_chapel.shutil, "which", lambda name: "/bin/chpl")
+    assert load_chapel(lambda name: module)[0] is module
+    assert os.environ["CHPL_HOME"] == str(home)
+    assert os.environ["CHPL_THIRD_PARTY"] == str(home / "third-party")
+    assert run.calls == []
+
+
+def test_load_module_path_without_helper_falls_back_to_chpl(
+    clean_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    module = _module_at(tmp_path / "x" / "third-party" / "chapel" / "__init__.py")
+    run = FakeRun(BOOTSTRAP)
+    clean_env.setattr(_chapel.subprocess, "run", run)
+    clean_env.setattr(_chapel.shutil, "which", lambda name: "/bin/chpl")
+    assert load_chapel(lambda name: module)[0] is module
+    assert os.environ["CHPL_HOME"] == "/opt/chapel/libexec"
+    assert len(run.calls) == 1
+
+
+def test_load_env_chpl_home_beats_module_path(
+    clean_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home, _ = make_chpl_home(tmp_path / "home")
+    module = _module_at(home / "third-party" / "chapel" / "__init__.py")
+    clean_env.setenv("CHPL_HOME", "/my/chapel")
+    assert load_chapel(lambda name: module)[0] is module
+    assert os.environ["CHPL_HOME"] == "/my/chapel"
+
+
 def test_load_context_failure(clean_env: pytest.MonkeyPatch) -> None:
     clean_env.setattr(_chapel.shutil, "which", lambda name: None)
     module = fake_chapel()

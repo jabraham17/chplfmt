@@ -65,6 +65,66 @@ type _Node = Doc | _FillAt
 type _Cmd = tuple[int, bool, _Node]
 type _Rests = tuple[list[_Cmd], ...]
 
+_COMPOSITE = (Concat, Fill, Group, ConditionalGroup, Indent, Align, IfBreak)
+_ZERO_WIDTH = (LineSuffix, TrailingComment, SuffixBreak, OnRender)
+
+
+def _flat_parts(d: Doc) -> tuple[Doc, ...] | None:
+    """Children scanned when `d` is printed flat, or None if its width isn't fixed."""
+    if d.forced:
+        return None
+    if isinstance(d, Concat | Fill):
+        return d.parts
+    if isinstance(d, Group | Indent | Align):
+        return (d.contents,)
+    if isinstance(d, ConditionalGroup):
+        return (d.alts[0],)
+    if isinstance(d, IfBreak) and d.group_id is None:
+        return (d.flat,)
+    return None
+
+
+def _leaf_width(d: Doc, widths: dict[Doc, int]) -> int:
+    if isinstance(d, Text):
+        return d.width
+    if isinstance(d, Line):
+        return -1 if d.hard else 0 if d.soft else 1
+    if isinstance(d, _ZERO_WIDTH):
+        return 0
+    return widths.get(d, -1)
+
+
+def _composite_width(root: Doc, widths: dict[Doc, int]) -> int:
+    """Flat width of `root` independent of column and group modes, else -1 (memoized)."""
+    stack: list[tuple[Doc, tuple[Doc, ...] | None]] = [(root, None)]
+    while stack:
+        d, parts = stack.pop()
+        if parts is None:
+            if d in widths:
+                continue
+            parts = _flat_parts(d)
+            if parts is None:
+                widths[d] = -1
+                continue
+            stack.append((d, parts))
+            stack.extend(
+                [
+                    (k, None)
+                    for k in parts
+                    if isinstance(k, _COMPOSITE) and k not in widths
+                ]
+            )
+            continue
+        total = 0
+        for k in parts:
+            w = _leaf_width(k, widths)
+            if w < 0:
+                total = -1
+                break
+            total += w
+        widths[d] = total
+    return widths[root]
+
 
 def render(doc: DocLike, options: FormatOptions, base_indent: int = 0) -> RenderResult:
     """Lay out `doc`; every line, the first included, starts at `base_indent`."""
@@ -160,6 +220,7 @@ class _Printer:
         self.records: list[LineRecord] = []
         self.suffixes: list[_Cmd] = []
         self.remeasure = False
+        self.widths: dict[Doc, int] = {}
 
     def finish(self) -> None:
         """End the current line, trimming trailing whitespace outside verbatim text."""
@@ -376,6 +437,7 @@ class _Printer:
             pos=self.pos,
         )
         sub.line_verbatim = self.line_verbatim
+        sub.widths = self.widths
         if not sub.run([(ind, BREAK, alt)]):
             return False
         return sub.line_verbatim or sub.pos + rest_w <= self.limit
@@ -391,6 +453,7 @@ class _Printer:
         """Column reached at the first possible line break, or -1 if it doesn't fit."""
         limit = self.limit
         tab = self.tab
+        widths = self.widths
         stack = nxt
         ri = -1
         rj = 0
@@ -405,6 +468,15 @@ class _Printer:
                 stack.append(rests[ri][rj])
                 must_be_flat = False
             _, mode, d = stack.pop()
+            if not mode and isinstance(d, _COMPOSITE):
+                w = widths.get(d)
+                if w is None:
+                    w = _composite_width(d, widths)
+                if w >= 0:
+                    col += w
+                    if col > limit:
+                        return -1
+                    continue
             if isinstance(d, Text):
                 w = d.width
                 col = col + w if w >= 0 else display_width(d.s, col, tab)

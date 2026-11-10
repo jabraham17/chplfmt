@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Iterable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
@@ -324,14 +324,19 @@ class Printer:
 
     def dangling(self, node: Key, *anchors: str) -> list[Comment]:
         """Not-yet-emitted dangling comments of `node` (see `dangling_comments`)."""
+        return self.unemitted(
+            d.comment
+            for d in self.trivia.dangling(node)
+            if not anchors or ("" if d.anchor is None else d.anchor.kind) in anchors
+        )
+
+    def unemitted(self, cs: Iterable[Comment]) -> list[Comment]:
+        """The comments of `cs` not emitted yet."""
+        found = list(cs)
+        if not found:
+            return found
         done = set(self.emitted)
-        found: list[Comment] = []
-        for d in self.trivia.dangling(node):
-            kind = "" if d.anchor is None else d.anchor.kind
-            if d.comment.token in done or (anchors and kind not in anchors):
-                continue
-            found.append(d.comment)
-        return found
+        return [c for c in found if c.token not in done]
 
     def check_comments(self) -> None:
         """Raise `InternalError` unless every attached comment was emitted once."""

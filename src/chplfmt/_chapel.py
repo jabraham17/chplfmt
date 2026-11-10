@@ -152,6 +152,21 @@ def _import_chapel(
         ) from e
 
 
+def _home_of_module(
+    module: ModuleType, steps: list[str]
+) -> tuple[str, dict[str, str]] | None:
+    """CHPL_HOME of a chapel-py inside `$CHPL_HOME/third-party/` (avoids running chpl)."""
+    path = getattr(module, "__file__", None)
+    if not isinstance(path, str):
+        return None
+    head, sep, _ = os.path.abspath(path).rpartition(os.sep + "third-party" + os.sep)
+    script = os.path.join(head, "util", "chplenv", "chpl_home_utils.py")
+    if not sep or not os.path.isfile(script):
+        return None
+    steps.append(f"CHPL_HOME from the chapel-py location: {head}")
+    return head, {"CHPL_HOME": head, "CHPL_THIRD_PARTY": head + sep.rstrip(os.sep)}
+
+
 def load_chapel(
     import_module: Callable[[str], ModuleType] = importlib.import_module,
 ) -> tuple[ModuleType, str]:
@@ -159,7 +174,9 @@ def load_chapel(
     steps: list[str] = []
     module = _import_chapel(import_module, steps)
     # chapel.Context() raises "CHPL_HOME must be set" without it.
-    if not os.environ.get("CHPL_HOME") and (found := find_chpl_home(steps)):
+    if not os.environ.get("CHPL_HOME") and (
+        found := _home_of_module(module, steps) or find_chpl_home(steps)
+    ):
         _set_env_defaults(found[1])
     try:
         version = str(module.Context().get_compiler_version())

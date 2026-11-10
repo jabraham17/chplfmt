@@ -38,26 +38,38 @@ class GroupId:
 # computed bottom-up at construction instead of in a separate render pre-pass.
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+_set = object.__setattr__
+
+
+@dataclass(frozen=True, slots=True, eq=False, init=False)
 class Text:
     s: str
     # Display width, or -1 if a tab makes it depend on the start column.
     width: int = field(init=False, repr=False)
     forced: ClassVar[bool] = False
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "width", -1 if "\t" in self.s else display_width(self.s)
-        )
+    def __init__(self, s: str) -> None:
+        _set(self, "s", s)
+        if "\t" in s:
+            _set(self, "width", -1)
+        elif s.isascii() and "\n" not in s:
+            _set(self, "width", len(s))
+        else:
+            _set(self, "width", display_width(s))
 
 
-@dataclass(frozen=True, slots=True, eq=False)
+@dataclass(frozen=True, slots=True, eq=False, init=False)
 class Concat:
     parts: tuple[Doc, ...]
     forced: bool = field(init=False, repr=False)
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "forced", any(p.forced for p in self.parts))
+    def __init__(self, parts: tuple[Doc, ...]) -> None:
+        _set(self, "parts", parts)
+        for p in parts:
+            if p.forced:
+                _set(self, "forced", True)
+                return
+        _set(self, "forced", False)
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -218,7 +230,7 @@ def concat(*docs: DocLike) -> Doc:
     """A sequence of docs."""
     if len(docs) == 1:
         return _doc(docs[0])
-    return Concat(tuple(_doc(d) for d in docs))
+    return Concat(tuple([text(d) if isinstance(d, str) else d for d in docs]))
 
 
 def group(doc: DocLike, id: GroupId | None = None, should_break: bool = False) -> Group:
