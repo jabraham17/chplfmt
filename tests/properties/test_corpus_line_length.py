@@ -8,8 +8,10 @@ A line longer than the limit is allowed only for one of these reasons
   only a trailing or own-line comment overflows.
 - `multiline-token`: it continues a token that starts on an earlier line
   (a block comment or multi-line string).
-- `first-token`: the first token that ends past the limit is the line's
-  first token, so the line has no break point before the overflow.
+- `no-break-point`: no break point precedes the first token that ends past
+  the limit (a multi-line token counts up to the line end). Unspaced
+  operators (`a=1`, `lo..#n`, `-x`) and the `else` of `} else` are not
+  break points.
 - `long-token`: that token alone does not fit on a continuation line
   (line indentation + `indent-width` + its width exceeds the limit).
 
@@ -149,7 +151,11 @@ def classify(text: str, path: str, options: FormatOptions) -> list[tuple[int, st
         if t.text not in BREAKS:
             return False
         if t.text not in OPENERS:
-            return True
+            if t.text == "else" and (j := index.prev_code(i)) is not None:
+                # `} else if ...` keeps `else` on the `}` line.
+                return toks[j].text != "}"
+            # Unspaced operators (`a=1`, `lo..#n`, unary `-x`) don't break.
+            return t.text == "," or text[t.end_offset : t.end_offset + 1] in " \n"
         # An open bracket breaks a call/index list or a list with commas;
         # `()` and a parenthesized expression `(a.b: T)` have no break point.
         close = t.match
@@ -176,8 +182,7 @@ def classify(text: str, path: str, options: FormatOptions) -> list[tuple[int, st
                 k
                 for k, i in enumerate(code)
                 if toks[i].start_offset >= start
-                and toks[i].end_offset <= end
-                and col(toks[i].end_offset) > limit
+                and col(min(toks[i].end_offset, end)) > limit
             ),
             None,
         )
@@ -196,7 +201,7 @@ def classify(text: str, path: str, options: FormatOptions) -> list[tuple[int, st
         elif overflow is not None and (
             indent
             + options.indent_width
-            + col(toks[code[overflow]].end_offset)
+            + col(min(toks[code[overflow]].end_offset, end))
             - col(toks[code[overflow]].start_offset)
             > limit
         ):

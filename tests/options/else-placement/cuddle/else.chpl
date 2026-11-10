@@ -1,0 +1,33 @@
+proc f(a: int) throws {
+  if a > 0 {
+    writeln("pos");
+  } else if a < 0 {
+    writeln("neg");
+  } else {
+    writeln("zero");
+  }
+
+  if a == 1 {
+    writeln(1);
+  }
+  else {
+    writeln(2);
+  }
+
+  try {
+    g();
+  } catch e: Error {
+    writeln(e);
+  } catch {
+    halt();
+  }
+
+  try! {
+    g();
+  }
+  catch {
+    halt();
+  }
+
+  if a then writeln(a); else writeln(-a);
+}

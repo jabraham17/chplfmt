@@ -65,15 +65,15 @@ forall i in (D) with (ref s) do s += i;
 
 [i in (D)] writeln(i);
 
-select(x + 1) {
+select (x + 1) {
   when (1), (2) do writeln("small");
   when (3 + 4) do writeln("seven");
   otherwise do writeln("other");
 }
 
-on(Locales[1]) do writeln(here);
+on (Locales[1]) do writeln(here);
 
-on(here.parent) do writeln(here);
+on (here.parent) do writeln(here);
 
 // Open-ended expressions stay in parentheses before a keyword.
 if (if a then b else c) then writeln(x);

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
@@ -37,6 +38,41 @@ def corpus_params() -> list[object]:
     """`pytest.param`s for `corpus_files()`, with ids relative to CHPL_HOME."""
     home = chpl_home()
     files = corpus_files()
+    if home is None or not files:
+        return [pytest.param(None, marks=pytest.mark.skip(reason="no Chapel corpus"))]
+    return [pytest.param(p, id=str(p.relative_to(home))) for p in files]
+
+
+SAMPLE_SIZE = 12
+SAMPLE_MAX_BYTES = 30_000
+
+
+def full_corpus() -> bool:
+    return os.environ.get("CHPLFMT_FULL_CORPUS") == "1"
+
+
+def sample_files(pinned: Iterable[str] = ()) -> list[Path]:
+    """A deterministic sample of `corpus_files()`; all of it if CHPLFMT_FULL_CORPUS=1.
+
+    The sample is the `pinned` files (paths relative to CHPL_HOME, skipped if
+    absent) plus small-to-medium files chosen by a stable hash of the path.
+    """
+    home = chpl_home()
+    files = corpus_files()
+    if home is None or not files or full_corpus():
+        return files
+    pins = [home / r for r in pinned if (home / r).is_file()]
+    by_hash = sorted(
+        (p for p in files if p not in pins and p.stat().st_size <= SAMPLE_MAX_BYTES),
+        key=lambda p: hashlib.sha256(str(p.relative_to(home)).encode()).hexdigest(),
+    )
+    return sorted([*pins, *by_hash[:SAMPLE_SIZE]])
+
+
+def sample_params(pinned: Iterable[str] = ()) -> list[object]:
+    """`pytest.param`s for `sample_files(pinned)`, with ids relative to CHPL_HOME."""
+    home = chpl_home()
+    files = sample_files(pinned)
     if home is None or not files:
         return [pytest.param(None, marks=pytest.mark.skip(reason="no Chapel corpus"))]
     return [pytest.param(p, id=str(p.relative_to(home))) for p in files]

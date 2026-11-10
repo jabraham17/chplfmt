@@ -276,6 +276,30 @@ def conditional_group(
     return ConditionalGroup(tuple(_doc(a) for a in alts), check)
 
 
+def flatten(doc: DocLike) -> Doc | None:
+    """`doc` with every line printed flat, or None if it must break."""
+    d = _doc(doc)
+    return None if d.forced else _flat(d)
+
+
+def _flat(d: Doc) -> Doc:
+    match d:
+        case Group(contents=c, id=gid):
+            return _flat(c) if gid is None else Group(_flat(c), gid, False)
+        case ConditionalGroup(alts=alts):
+            return _flat(alts[0])
+        case IfBreak(flat=f):
+            return _flat(f)
+        case Line(soft=soft):
+            return EMPTY if soft else Text(" ")
+        case Concat(parts=parts) | Fill(parts=parts):
+            return concat(*map(_flat, parts))
+        case Indent(contents=c) | Align(contents=c):
+            return _flat(c)
+        case _:
+            return d
+
+
 def verbatim(s: str, bol: bool = False) -> Verbatim:
     """Text (possibly multi-line) emitted byte-for-byte.
 

@@ -1,0 +1,31 @@
+
+
+var a = 1;
+var b = 2;
+
+
+
+var c = 3;
+
+var d = 4;
+proc f() {
+
+  var x = 1;
+
+
+
+  var y = 2;
+
+}
+
+
+
+
+record R {
+  var q: int;
+
+
+  var r: int;
+}
+
+

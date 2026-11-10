@@ -1,0 +1,10 @@
+var s = "a\tb";
+//	comment	with	tabs
+var x = 1;	// trailing	tab
+var yy = 22;		// aligned
+/*	tabbed
+	block
+*/
+proc f() {
+	return "	";
+}

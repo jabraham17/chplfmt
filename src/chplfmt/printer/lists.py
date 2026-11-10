@@ -15,6 +15,7 @@ from chplfmt.doc import (
     concat,
     conditional_group,
     fill,
+    flatten,
     group,
     hardline,
     indent,
@@ -260,10 +261,22 @@ def assignment(p: Printer, lhs: Doc, op: str, rhs: Node) -> Doc:
         with p.nested(cont):
             r = p.print(rhs)
         return concat(lhs, " ", op, indent(concat(hardline, r), cont))
+    rhs_d = align(r) if aligns_in_parens(rhs) else r
+    flat_lhs = flatten(lhs)
+    if flat_lhs is None:
+        return conditional_group(
+            [
+                concat(lhs, " ", op, " ", rhs_d),
+                concat(lhs, " ", op, indent(concat(hardline, r), cont)),
+            ],
+            FIRST_LINE,
+        )
+    # The lhs breaks only if it doesn't fit before `op` on one line.
     return conditional_group(
         [
-            concat(lhs, " ", op, " ", align(r) if aligns_in_parens(rhs) else r),
-            concat(lhs, " ", op, indent(concat(hardline, r), cont)),
+            concat(flat_lhs, " ", op, " ", rhs_d),
+            concat(flat_lhs, " ", op, indent(concat(hardline, r), cont)),
+            concat(lhs, " ", op, " ", rhs_d),
         ],
         FIRST_LINE,
     )

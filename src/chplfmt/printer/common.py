@@ -21,6 +21,8 @@ SPACE_BEFORE_OPEN = frozenset(
     | {"const", "param", "type"}
     | {"for", "forall", "foreach", "coforall", "in", "if", "while", "with"}
     | {"then", "else", "do", "try", "try!"}
+    | {"select", "when", "on", "yield", "throw", "delete", "local", "serial"}
+    | {"manage", "by", "align"}
 )
 
 

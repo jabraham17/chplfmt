@@ -1,0 +1,20 @@
+var A = [1, 2, 3];
+var B = [1, 2, 3];
+var t = (aaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbb, cccccccccccccccccccccc,
+         dddddddddddddddddd);
+proc f(a: int, b: int) { }
+f(1, 2);
+enum E { a, b }
+enum F { x, y }
+var one = (1,);
+const D = {1..n, 1..m};
+writeln(aaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbbbbbb,
+        cccccccccccccccccccccccc, dddd);
+const messages = [
+  "the first message in the list", "the second message",
+  "a third message that is quite a bit longer than all the others",
+];
+enum G {
+  a, // first
+  b, // second
+}

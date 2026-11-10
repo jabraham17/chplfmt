@@ -1,0 +1,15 @@
+proc f() {
+  const someLongVariableName = someFunctionWithALongName(argumentNumberOne) +
+                               anotherFunctionCall(argumentTwo);
+  callAVeryLongFunctionNameThatPushesTheOpenBracketVeryFarRight(
+    firstArgumentValue, secondArgumentValue
+  );
+  const aVeryLongVariableNameForTesting: someLongTypeName(int) =
+    anExtremelyLongFunctionName(x);
+  const messages = [
+    "the first message in the list", "the second message",
+    "a third message that is quite a bit longer than all the others",
+  ];
+  proc g(aVeryLongFormalNameNumberOne: someLongTypeName,
+         aVeryLongFormalNameNumberTwo: int) { }
+}

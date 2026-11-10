@@ -48,6 +48,16 @@ def test_on_render_runs_only_in_the_chosen_layout() -> None:
     assert calls == ["flat"]
 
 
+def test_flatten() -> None:
+    from chplfmt.doc import flatten
+
+    d = group(concat("f(", indent(concat(softline, fill(["a,", line, "b"])), 2), ")"))
+    flat = flatten(d)
+    assert flat is not None
+    assert r(flat, n=3) == "f(a, b)"
+    assert flatten(concat("a", hardline)) is None
+
+
 def test_flat_width() -> None:
     opts = FormatOptions(line_length=5)
     assert flat_width(group(concat("abc", line, "defgh")), opts) == 9
