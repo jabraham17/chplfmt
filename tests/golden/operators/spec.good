@@ -72,8 +72,8 @@ proc chains() {
          someOtherCondition(idx);
   flag &&= isValid(idx) && idx < limit && !visited[idx] &&
            idx != sentinelValue && someOtherCondition(idx);
-  return isValid(idx) && idx < limit && !visited[idx] &&
-         idx != sentinelValue && someOtherCondition(idx);
+  return isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+         someOtherCondition(idx);
 }
 
 proc parens() {

@@ -62,6 +62,23 @@ COVERED = frozenset(
         "Let",
         "OpCall",
         "Conditional",
+        "Return",
+        "Yield",
+        "Throw",
+        "Break",
+        "Continue",
+        "Delete",
+        "Label",
+        "Use",
+        "Import",
+        "VisibilityClause",
+        "As",
+        "Include",
+        "Require",
+        "Implements",
+        "ExternBlock",
+        "Init",
+        "EmptyStmt",
     }
 )
 
