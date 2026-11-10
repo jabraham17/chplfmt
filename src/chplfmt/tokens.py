@@ -12,6 +12,7 @@ from collections.abc import Iterable, Iterator, Sequence
 from functools import cache
 from typing import cast
 
+from chplfmt import _native
 from chplfmt._chapel import chapel
 from chplfmt.lexer import OPEN_BRACKETS, Token, TokenKind, tokenize
 from chplfmt.source import Pos, SourceText
@@ -51,6 +52,10 @@ _CATEGORIES: tuple[tuple[int, type | tuple[type, ...]], ...] = (
 def _category(cls: type) -> int:
     """Which `_base_span` case applies to nodes of class `cls`."""
     return next((k for k, c in _CATEGORIES if issubclass(cls, c)), _OTHER)
+
+
+def _native_class(cls: type) -> tuple[int, bool]:
+    return _category(cls), issubclass(cls, _BODY_OWNERS)
 
 
 def opaque_ranges(source: SourceText, asts: Iterable[Node]) -> list[tuple[int, int]]:
@@ -136,6 +141,13 @@ class TokenIndex:
         walk = _walk(asts)
         tokens = tokenize(source, _opaque_ranges(source, walk[0]))
         return cls(source, tokens, asts, walk=walk)
+
+    @classmethod
+    def build_native(cls, source: SourceText, asts: Sequence[Node]) -> _native.NativeIndex:
+        """Build the opt-in native spans and ownership index for parity checks."""
+        return _native.build_index(
+            source, asts, _native_class, chapel.Comment, chapel.ExternBlock
+        )
 
     # Location lookup
 

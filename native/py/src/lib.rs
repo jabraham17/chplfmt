@@ -1,6 +1,9 @@
+mod extract;
+
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
+use chplfmt_core::index::{NodeId, TokenIndex as CoreIndex};
 use chplfmt_core::lexer::scan::{self, LexErrorKind};
 use chplfmt_core::lexer::token::{Token as CoreToken, TokenKind as CoreKind, NO_MATCH};
 use pyo3::class::basic::CompareOp;
@@ -8,7 +11,7 @@ use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError, PyZeroDivisionError};
 use pyo3::prelude::*;
 use pyo3::sync::GILOnceCell;
-use pyo3::types::PyString;
+use pyo3::types::{PyDict, PyString, PyTuple};
 
 create_exception!(chplfmt._native, NativeLexError, PyException);
 
@@ -252,6 +255,140 @@ fn lex(py: Python<'_>, text: &str, opaque: Vec<(usize, usize)>) -> PyResult<Vec<
         .collect()
 }
 
+#[pyclass(name = "NativeIndex")]
+struct NativeIndex {
+    value: CoreIndex,
+    nodes: Vec<Py<PyAny>>,
+    id_of: Py<PyDict>,
+    tokens: Vec<Py<PyToken>>,
+}
+
+impl NativeIndex {
+    fn node_id(&self, node: &Bound<'_, PyAny>) -> PyResult<Option<NodeId>> {
+        self.id_of
+            .bind(node.py())
+            .get_item(node)?
+            .map(|value| value.extract())
+            .transpose()
+    }
+
+    fn node(&self, py: Python<'_>, id: NodeId) -> Option<Py<PyAny>> {
+        self.nodes.get(id as usize).map(|node| node.clone_ref(py))
+    }
+}
+
+#[pymethods]
+impl NativeIndex {
+    #[getter]
+    fn tokens(&self, py: Python<'_>) -> Vec<Py<PyToken>> {
+        self.tokens
+            .iter()
+            .map(|token| token.clone_ref(py))
+            .collect()
+    }
+
+    #[getter]
+    fn problems(&self, py: Python<'_>) -> PyResult<Vec<String>> {
+        self.value
+            .problems
+            .iter()
+            .map(|&(kid, prev)| {
+                let kid = self.nodes[kid as usize].bind(py);
+                let prev = self.nodes[prev as usize].bind(py);
+                Ok(format!(
+                    "{} at {} overlaps {} at {}",
+                    kid.call_method0("tag")?.str()?,
+                    kid.call_method0("location")?.call_method0("start")?.str()?,
+                    prev.call_method0("tag")?.str()?,
+                    prev.call_method0("location")?
+                        .call_method0("start")?
+                        .str()?,
+                ))
+            })
+            .collect()
+    }
+
+    fn nodes(&self, py: Python<'_>) -> Vec<Py<PyAny>> {
+        self.id_of
+            .bind(py)
+            .keys()
+            .iter()
+            .map(|node| node.unbind())
+            .collect()
+    }
+
+    fn find_start(&self, position: &Bound<'_, PyAny>) -> PyResult<Option<u32>> {
+        Ok(self.value.find_start(extract::position(position)?))
+    }
+
+    fn find_end(&self, position: &Bound<'_, PyAny>) -> PyResult<Option<u32>> {
+        Ok(self.value.find_end(extract::position(position)?))
+    }
+
+    fn span(&self, location: &Bound<'_, PyAny>) -> PyResult<Option<(u32, u32)>> {
+        let (start, end) = if let Ok(pair) = location.downcast::<PyTuple>() {
+            (
+                extract::position(&pair.get_item(0)?)?,
+                extract::position(&pair.get_item(1)?)?,
+            )
+        } else {
+            extract::location(location)?
+        };
+        Ok(self.value.span(start, end))
+    }
+
+    fn node_span(&self, node: &Bound<'_, PyAny>) -> PyResult<Option<(u32, u32)>> {
+        Ok(self.node_id(node)?.and_then(|id| self.value.node_span(id)))
+    }
+
+    fn owner(&self, py: Python<'_>, token: u32) -> Option<Py<PyAny>> {
+        self.node(py, self.value.owner(token))
+    }
+
+    fn parent(&self, py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Option<Py<PyAny>>> {
+        Ok(self
+            .node_id(node)?
+            .and_then(|id| self.node(py, self.value.facts.parent[id as usize])))
+    }
+
+    fn children(&self, py: Python<'_>, node: &Bound<'_, PyAny>) -> PyResult<Vec<Py<PyAny>>> {
+        Ok(self.node_id(node)?.map_or_else(Vec::new, |id| {
+            self.value
+                .children(id)
+                .iter()
+                .filter_map(|&kid| self.node(py, kid))
+                .collect()
+        }))
+    }
+
+    fn own_tokens(&self, node: &Bound<'_, PyAny>) -> PyResult<Vec<u32>> {
+        Ok(self
+            .node_id(node)?
+            .map_or_else(Vec::new, |id| self.value.own_tokens(id).to_vec()))
+    }
+}
+
+#[pyfunction]
+fn build_index(
+    py: Python<'_>,
+    source: &Bound<'_, PyAny>,
+    roots: &Bound<'_, PyAny>,
+    classify: &Bound<'_, PyAny>,
+    comment: &Bound<'_, PyAny>,
+    extern_block: &Bound<'_, PyAny>,
+) -> PyResult<NativeIndex> {
+    let extracted = extract::walk(py, source, roots, classify, comment, extern_block)?;
+    let text: String = source.getattr("text")?.extract()?;
+    let tokens = lex(py, &text, extracted.opaque)?;
+    let core_tokens = tokens.iter().map(|token| token.borrow(py).value).collect();
+    Ok(NativeIndex {
+        value: CoreIndex::new(&text, core_tokens, extracted.facts),
+        nodes: extracted.nodes,
+        id_of: extracted.id_of,
+        tokens,
+    })
+}
+
 #[pyfunction]
 fn char_width(ch: &str) -> PyResult<i64> {
     let mut chars = ch.chars();
@@ -273,8 +410,10 @@ fn display_width(text: &str, start_col: i64, tab_size: i64) -> PyResult<i64> {
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyTokenKind>()?;
     module.add_class::<PyToken>()?;
+    module.add_class::<NativeIndex>()?;
     module.add("NativeLexError", module.py().get_type::<NativeLexError>())?;
     module.add_function(wrap_pyfunction!(lex, module)?)?;
+    module.add_function(wrap_pyfunction!(build_index, module)?)?;
     module.add_function(wrap_pyfunction!(char_width, module)?)?;
     module.add_function(wrap_pyfunction!(display_width, module)?)?;
     Ok(())

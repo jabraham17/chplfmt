@@ -308,6 +308,40 @@ def test_owner_and_children() -> None:
         assert idx.parent(call) == find(idx, chapel.Module)
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "var x = 1;\n",
+        "/* h */\nmodule M { }\n",
+        "// first\n// second\nmodule M { }\n",
+        'pragma "no init"\n@deprecated(since="1.0")\nproc g(x: int): int { return x; }\n',
+        "var a: owned C?; var b = new C(1);\n",
+        "if a then f(1); else { g(2); }\n",
+        "use M only a;\nextern { int x; }\n",
+    ],
+)
+def test_native_index_phase_3a_parity(text: str) -> None:
+    with indexed(text) as idx:
+        native = TokenIndex.build_native(idx.source, idx.roots)
+        assert native.tokens == idx.tokens
+        assert native.problems == idx.problems
+        assert native.nodes() == list(idx.nodes())
+        for node in idx.nodes():
+            assert native.span(node.location()) == idx.span(node.location())
+            assert native.node_span(node) == idx.node_span(node)
+            assert native.parent(node) == idx.parent(node)
+            assert native.children(node) == idx.children(node)
+            assert native.own_tokens(node) == idx.own_tokens(node)
+        for token, value in enumerate(idx.tokens):
+            assert native.owner(token) == idx.owner(token)
+            assert native.find_start(value.start) == idx.by_start[value.start]
+            if value.kind is not TokenKind.EOF:
+                assert native.find_end(value.end) == idx.by_end[value.end]
+        assert native.span(((1, 2), (1, 10))) == idx.span(((1, 2), (1, 10)))
+        assert native.find_start((0, 0)) is None
+        assert native.find_end((0, 0)) is None
+
+
 # User parentheses
 
 
