@@ -7,3 +7,14 @@ proc g() throws {
   try! f();
   var y = try! f();
 }
+
+// otherwise without `do`
+select x {
+  when 1 do f();
+  otherwise compilerError("a");
+}
+select y {
+  otherwise
+    // c
+    halt();
+}

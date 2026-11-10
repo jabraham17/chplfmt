@@ -14,6 +14,7 @@ from chplfmt.doc import (
     flat_width,
     group,
     hardline,
+    indent,
     line,
     text,
 )
@@ -174,25 +175,35 @@ def print_conditional(p: Printer, node: Node) -> Doc | None:
         return _statement_if(p, node)
     # Check everything before printing: a fallback must not follow printed children.
     chain = [node]
-    while (els := chain[-1].else_block()) is not None and (nested := _else_if(p, els)):
+    while (
+        (els := chain[-1].else_block()) is not None
+        and not p.dangling(chain[-1], "else")
+        and (nested := _else_if(p, els))
+    ):
         chain.append(nested)
     for c in chain:
         blocks = [c.then_block(), c.else_block()]
-        if p.dangling(c) or any(
+        if len(p.dangling(c)) != len(p.dangling(c, "then", "else")) or any(
             b is not None and len(p.index.children(b)) != 1 for b in blocks
         ):
             return None
+
+    def keyword(c: chapel.Conditional, kw: str, block: Node) -> list[DocLike]:
+        cs = p.dangling(c, kw)
+        if not cs and not p.trivia.leading(block):
+            return [f"{kw} ", _branch(p, block)]
+        brk = not cs or cs[-1].is_line or cs[-1].placement is Placement.OWN_LINE
+        sep = hardline if brk else text(" ")
+        n = p.options.indent_width
+        return [kw, indent(concat(p.comments_after(cs), sep, _branch(p, block)), n)]
+
     parts: list[DocLike] = []
     for k, c in enumerate(chain):
         if k:
             parts += [line, "else if "]
-        parts += [
-            aligned_expr(p, c.condition()),
-            line,
-            "then ",
-            _branch(p, c.then_block()),
-        ]
+        parts += [aligned_expr(p, c.condition()), line]
+        parts += keyword(c, "then", c.then_block())
     last = chain[-1].else_block()
     if last is not None:
-        parts += [line, "else ", _branch(p, last)]
+        parts += [line, *keyword(chain[-1], "else", last)]
     return group(concat("if ", align(concat(*parts))))

@@ -123,3 +123,15 @@ begin with (ref aVeryLongVariableName, ref anotherVeryLongVariableName,
             const in y) {
   f();
 }
+
+// otherwise without `do`
+select x {
+  when 1 do f();
+  otherwise do compilerError("a");
+}
+select y {
+  otherwise {
+    // c
+    halt();
+  }
+}

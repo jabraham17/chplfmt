@@ -282,10 +282,22 @@ def print_when(p: Printer, node: Node) -> Doc | None:
         for i in [*p.index.own_tokens(node), *p.index.structural_brackets(blk)]
         if i > first and p.tokens[i].text in ("do", "{")
     ]
-    if not starts:
+    if starts:
+        hl = _before(p, min(starts))
+    elif (kids := list(p.index.children(blk))) and p.tokens[first].text == "otherwise":
+        # `otherwise S;` without `do`.
+        hl = _before(p, outer_start(p, kids[0]))
+    else:
         return None
-    hl = _before(p, min(starts))
-    header, broke = tokens_doc(p, node, first, hl)
+    cases = list(node.case_exprs())
+    if (
+        cases
+        and p.tokens[first].text == "when"
+        and not any(p.tokens[i].is_comment for i in range(first, hl + 1))
+    ):
+        header, broke = concat("when ", list_fill(p, cases)), False
+    else:
+        header, broke = tokens_doc(p, node, first, hl)
     return with_attributes(p, node, Body(p, node, hl, block=blk).doc(header, broke))
 
 

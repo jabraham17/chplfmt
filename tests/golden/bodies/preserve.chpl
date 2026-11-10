@@ -87,3 +87,14 @@ var z = try! g();
 try { f(); } catch (e: Error) { }
 
 begin with (ref aVeryLongVariableName, ref anotherVeryLongVariableName, const in y) f();
+
+// otherwise without `do`
+select x {
+  when 1 do f();
+  otherwise compilerError("a");
+}
+select y {
+  otherwise
+    // c
+    halt();
+}

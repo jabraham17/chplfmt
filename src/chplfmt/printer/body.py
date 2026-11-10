@@ -359,7 +359,7 @@ class Body:
         """The keyword (`header do S;`) or bare (`header S;`) form."""
         p = self.p
         kind = kind or ("keyword" if self.form == "keyword" else "bare")
-        if self.source == "braces":
+        if self.source == "braces" or (self.source == "bare" and kind == "keyword"):
             self._record()
         d, trail = self.statement()
         trail = concat(trail, self._block_trail())

@@ -9,6 +9,8 @@ from chplfmt._chapel import chapel
 from chplfmt.doc import Doc, concat, hardline, text
 from chplfmt.printer.common import tokens_doc
 from chplfmt.printer.core import Printer, printer
+from chplfmt.printer.exprs import actual_items
+from chplfmt.printer.lists import bracket_list
 from chplfmt.tokens import Node
 from chplfmt.trivia import Placement
 
@@ -63,5 +65,14 @@ def print_attribute(p: Printer, node: Node) -> Doc:
     """`@name`, `@a.b`, `@name(args)`; named actuals as `since="2.0"`."""
     sp = p.index.node_span(node)
     assert sp is not None
+    brackets = p.index.structural_brackets(node)
+    if brackets and brackets[0] > sp[0]:
+        open_tok = brackets[0]
+        name, _ = tokens_doc(
+            p, node, sp[0], open_tok - 1, tight=frozenset({"="}), anchors=()
+        )
+        if not p.tokens[open_tok - 1].is_comment:
+            items = actual_items(p, node, open_tok)
+            return concat(name, bracket_list(p, node, open_tok, items))
     d, _ = tokens_doc(p, node, sp[0], sp[1], tight=frozenset({"="}), anchors=())
     return d
