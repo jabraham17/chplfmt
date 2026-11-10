@@ -10,6 +10,7 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+from chplfmt import ranges
 from chplfmt._chapel import Diagnostic, parse_text
 from chplfmt.config import FormatOptions, load_options
 from chplfmt.doc import render
@@ -186,7 +187,11 @@ def format_text(
         if parsed.errors:
             raise ChplParseError(parsed.errors)
         index = TokenIndex.build(SourceText.from_text(text), parsed.asts)
-        result, report = _print_text(index, options, logical)
+        if lines is None:
+            result, report = _print_text(index, options, logical)
+            formatted = None
+        else:
+            result, report, formatted = _print_range(index, options, logical, lines)
         if not debug.skip_verify:
             try:
                 verify(
@@ -196,6 +201,7 @@ def format_text(
                     options,
                     input_parse=parsed,
                     input_index=index,
+                    formatted_lines=formatted,
                 )
             except VerificationError:
                 if debug.dump_failed_dir is not None:
@@ -210,6 +216,23 @@ def _print_text(
 ) -> tuple[str, PrintReport]:
     p = Printer(index, options, path=path)
     return render(p.print_file(), options).text, p.report
+
+
+def _print_range(
+    index: TokenIndex, options: FormatOptions, path: str, lines: tuple[int, int]
+) -> tuple[str, PrintReport, tuple[int, int] | None]:
+    """The text with only the statements intersecting `lines` formatted."""
+    p = Printer(index, options, path=path, range_lines=lines)
+    p.print_file()
+    sel = p.selection
+    report = PrintReport(warnings=p.report.warnings)
+    if sel is None or sel.doc is None:
+        return index.source.text, report, None
+    lo, hi = sel.first_line, sel.last_line
+    report.applications += [
+        a for a in p.report.applications if lo <= a.input_line <= hi
+    ]
+    return ranges.splice(index.source, sel, p), report, (lo, hi)
 
 
 def _dump_failed(directory: str, path: str, text: str) -> None:

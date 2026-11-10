@@ -459,6 +459,7 @@ class _Verifier:
         )
         self.a = _Side(a, set[int]().union(*(n.removable_tokens(a) for n in rules)))
         self.b = _Side(b, set[int]().union(*(n.removable_tokens(b) for n in rules)))
+        self.formatted_lines: tuple[int, int] | None = None
 
     def fail(self, check: str, input_pos: Pos, output_pos: Pos) -> VerificationError:
         return VerificationError(self.path, check, input_pos, output_pos)
@@ -484,9 +485,14 @@ class _Verifier:
         ta, tb = self.ia.tokens, self.ib.tokens
         tab = self.options.tab_size
         ca, cb = self.a.comments, self.b.comments
+        lines = self.formatted_lines
         for k in range(max(len(ca), len(cb))):
             if k < len(ca) and k < len(cb):
                 x, y = ta[ca[k]], tb[cb[k]]
+                if lines is not None and not lines[0] <= x.start[0] <= lines[1]:
+                    if x.text == y.text:
+                        continue
+                    raise self.fail("comments", self.a.pos(ca, k), self.b.pos(cb, k))
                 expected = expected_comment_text(
                     x.text,
                     input_col=self.a.source.display_column(x.start_offset, tab),
@@ -531,10 +537,13 @@ def verify(
     *,
     input_parse: ParseResult | None = None,
     input_index: TokenIndex | None = None,
+    formatted_lines: tuple[int, int] | None = None,
 ) -> None:
     """Raise `VerificationError` unless `output_text` is a faithful formatting.
 
     `input_parse` and `input_index` (of `input_text`) are reused when given.
+    With `formatted_lines` (range formatting), comments of input lines outside
+    that range must be unchanged.
     """
     with ExitStack() as stack:
         out = stack.enter_context(parse_text(output_text, path))
@@ -549,6 +558,7 @@ def verify(
             inp = input_parse or stack.enter_context(parse_text(input_text, path))
             input_index = TokenIndex.build(SourceText.from_text(input_text), inp.asts)
         v = _Verifier(path, options, input_index, ib)
+        v.formatted_lines = formatted_lines
         v.check_ast()
         v.check_tokens()
         v.check_comments()

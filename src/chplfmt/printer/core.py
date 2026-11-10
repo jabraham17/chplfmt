@@ -14,6 +14,7 @@ from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
+from chplfmt import ranges
 from chplfmt._chapel import chapel
 from chplfmt.comments import expected_comment_text, space_line_comment
 from chplfmt.config import FormatOptions
@@ -100,7 +101,7 @@ class PrintReport:
 
 
 @dataclass
-class _Element:
+class Element:
     """One item of a statement list: a node, a loose token run, or an off region."""
 
     first: int  # token span
@@ -121,6 +122,7 @@ class Printer:
         off: OffRegions | None = None,
         registry: dict[type, PrintFn] | None = None,
         path: str = "<stdin>",
+        range_lines: tuple[int, int] | None = None,
     ) -> None:
         self.index = index
         self.source = index.source
@@ -144,6 +146,10 @@ class Printer:
         self._dispatch: dict[type, PrintFn | None] = {}
         # Token indices of user parentheses dropped by remove-redundant-parens.
         self.removed_parens: set[int] = set()
+        # Range formatting (section 7.10): the deepest list containing the range.
+        self.range_lines = range_lines
+        self.selection: ranges.Selection | None = None
+        self.list_depth = 0
 
     # Bookkeeping
 
@@ -506,43 +512,65 @@ class Printer:
         an own-line `//` comment) and prints dangling comments of the list's
         owner (`dangling_comments`), e.g. an end-of-line comment after `{`.
         """
-        parts: list[Doc] = []
-        started = False
-        for el in self._elements(stmts, first, end):
-            node = el.node
-            if el.region is not None:
-                lead = [c for n in el.swallowed for c in self.trivia.leading(n)]
-                if started:
-                    parts += self._breaks(
-                        self.tokens[lead[0].token if lead else el.first].nl_before
-                    )
-                r = el.region
-                parts += [self.leading_comments(n) for n in el.swallowed]
-                parts.append(verbatim(self.source.text[r.start : r.end], bol=True))
-                parts += [self.trailing_comments(n) for n in el.swallowed]
-                started = True
-                continue
-            first_tok = el.first
-            if node is not None and (lead := self.trivia.leading(node)):
-                first_tok = lead[0].token
-            if (
-                isinstance(node, chapel.EmptyStmt)
-                and self.options.remove_empty_statements
+        elements = self._elements(stmts, first, end)
+        sel = None
+        if self.range_lines is not None:
+            sel = ranges.select(self, elements)
+            if sel is not None and (
+                self.selection is None or sel.depth >= self.selection.depth
             ):
-                self.record("remove-empty-statements", el.first)
-                cs = self.trivia.leading(node) + self.trivia.trailing(node)
-                if not cs:
-                    continue
-                d = self._comment_lines(cs)
-            elif node is not None:
-                d = self.print(node, col=self.indent)
+                self.selection = sel
             else:
-                d = self.raw_tokens(el.first, el.last, col=self.indent)
-            if started:
-                parts += self._breaks(self.tokens[first_tok].nl_before)
+                sel = None
+        items: list[tuple[int, Doc]] = []
+        saved = self.indent
+        start = 0
+        self.list_depth += 1
+        for k, el in enumerate(elements):
+            if sel is not None and k == sel.lo:
+                self.indent, start = sel.base, len(items)
+            item = self._element(el)
+            if item is not None:
+                items.append(item)
+            if sel is not None and k == sel.hi - 1:
+                self.indent = saved
+                sel.doc = self._join(items[start:])
+        self.list_depth -= 1
+        return self._join(items)
+
+    def _join(self, items: Sequence[tuple[int, Doc]]) -> Doc:
+        parts: list[Doc] = []
+        for k, (nl, d) in enumerate(items):
+            if k:
+                parts += self._breaks(nl)
             parts.append(d)
-            started = True
         return concat(*parts)
+
+    def _element(self, el: Element) -> tuple[int, Doc] | None:
+        """An item's Doc and the newlines before it (None: nothing to print)."""
+        node = el.node
+        if el.region is not None:
+            lead = [c for n in el.swallowed for c in self.trivia.leading(n)]
+            nl = self.tokens[lead[0].token if lead else el.first].nl_before
+            r = el.region
+            parts = [self.leading_comments(n) for n in el.swallowed]
+            parts.append(verbatim(self.source.text[r.start : r.end], bol=True))
+            parts += [self.trailing_comments(n) for n in el.swallowed]
+            return nl, concat(*parts)
+        first_tok = el.first
+        if node is not None and (lead := self.trivia.leading(node)):
+            first_tok = lead[0].token
+        if isinstance(node, chapel.EmptyStmt) and self.options.remove_empty_statements:
+            self.record("remove-empty-statements", el.first)
+            cs = self.trivia.leading(node) + self.trivia.trailing(node)
+            if not cs:
+                return None
+            d = self._comment_lines(cs)
+        elif node is not None:
+            d = self.print(node, col=self.indent)
+        else:
+            d = self.raw_tokens(el.first, el.last, col=self.indent)
+        return self.tokens[first_tok].nl_before, d
 
     def _comment_lines(self, cs: list[Comment]) -> Doc:
         """Comments each on its own line (those of a dropped statement or file)."""
@@ -553,13 +581,13 @@ class Printer:
             parts.append(self.comment_doc(c.token))
         return concat(*parts)
 
-    def _elements(self, stmts: Sequence[Node], first: int, end: int) -> list[_Element]:
+    def _elements(self, stmts: Sequence[Node], first: int, end: int) -> list[Element]:
         """List items in token order; off regions swallow the items they contain.
 
         Comments are not items: they are attached to nodes.
         """
         tokens = self.tokens
-        items: list[_Element] = []
+        items: list[Element] = []
 
         def loose(i: int, stop: int) -> None:
             while i < stop:
@@ -569,7 +597,7 @@ class Printer:
                 j = i
                 while j + 1 < stop and not tokens[j + 1].is_comment:
                     j += 1
-                items.append(_Element(i, j))
+                items.append(Element(i, j))
                 i = j + 1
 
         i = first
@@ -578,7 +606,7 @@ class Printer:
             if sp is None:
                 continue
             loose(i, sp[0])
-            items.append(_Element(sp[0], sp[1], node=node))
+            items.append(Element(sp[0], sp[1], node=node))
             i = sp[1] + 1
         loose(i, end)
 
@@ -593,13 +621,13 @@ class Printer:
         )
         if not regions:
             return items
-        out: list[_Element] = []
+        out: list[Element] = []
         ri = 0
-        current: _Element | None = None
+        current: Element | None = None
         for it in items:
             while ri < len(regions) and regions[ri].off_token < it.first:
                 r = regions[ri]
-                current = _Element(r.off_token, r.off_token, region=r)
+                current = Element(r.off_token, r.off_token, region=r)
                 out.append(current)
                 ri += 1
             if (
@@ -611,7 +639,7 @@ class Printer:
                     current.swallowed.append(it.node)
                 continue
             out.append(it)
-        out += [_Element(r.off_token, r.off_token, region=r) for r in regions[ri:]]
+        out += [Element(r.off_token, r.off_token, region=r) for r in regions[ri:]]
         return out
 
     # File level
