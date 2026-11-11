@@ -48,6 +48,7 @@ class NativeLexError(Exception):
     char: str | None
 
 class NativeIndex:
+    def __init__(self, source: Any, roots: Any, classify: Any, comment: Any, extern_block: Any) -> None: ...
     @property
     def source(self) -> Any: ...
     @property

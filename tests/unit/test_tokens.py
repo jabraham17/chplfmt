@@ -1,3 +1,5 @@
+import gc
+import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -5,9 +7,10 @@ from typing import Any
 import pytest
 
 from chplfmt._chapel import chapel, parse_text
-from chplfmt.lexer import TokenKind
+from chplfmt.lexer import LexError, TokenKind, tokenize
 from chplfmt.source import SourceText
 from chplfmt.tokens import Span, TokenIndex, string_value
+from reference.tokens import TokenIndex as ReferenceTokenIndex
 
 
 @contextmanager
@@ -50,9 +53,9 @@ def delimiters(idx: TokenIndex, node: Any) -> list[str]:
 
 def test_by_start_by_end_and_exact_span() -> None:
     with indexed("var x = 1;\n") as idx:
-        assert idx.by_start[(1, 1)] == 0
-        assert idx.by_end[(1, 4)] == 0
-        assert idx.by_end[(1, 11)] == 4
+        assert idx.find_start((1, 1)) == 0
+        assert idx.find_end((1, 4)) == 0
+        assert idx.find_end((1, 11)) == 4
         var = find(idx, chapel.Variable)
         assert idx.span(var.location()) == (0, 3)
         assert idx.span(((1, 5), (1, 10))) == (1, 3)
@@ -75,7 +78,8 @@ def test_span_of_missing_or_empty_location_is_none() -> None:
 
 def test_next_and_prev_code_skip_comments() -> None:
     with indexed("var x /* a */ = // b\n 1;\n") as idx:
-        eq = idx.by_start[(1, 15)]
+        eq = idx.find_start((1, 15))
+        assert eq is not None
         assert idx.tokens[eq].text == "="
         assert idx.tokens[idx.next_code(eq)].text == "1"
         assert idx.prev_code(eq) == 1
@@ -321,8 +325,8 @@ def test_owner_and_children() -> None:
     ],
 )
 def test_native_index_phase_3a_parity(text: str) -> None:
-    with indexed(text) as idx:
-        native = TokenIndex.build_native(idx.source, idx.roots)
+    with indexed(text) as native:
+        idx = ReferenceTokenIndex.build(native.source, native.roots)
         assert native.tokens is native.tokens
         assert native.tokens == idx.tokens
         assert native.problems == idx.problems
@@ -350,12 +354,36 @@ def test_native_index_phase_3a_parity(text: str) -> None:
             if token < len(idx.tokens) - 1:
                 assert native.next_code(token) == idx.next_code(token)
             assert native.prev_code(token) == idx.prev_code(token)
-            assert native.find_start(value.start) == idx.by_start[value.start]
+            assert native.find_start(value.start) == idx.find_start(value.start)
             if value.kind is not TokenKind.EOF:
-                assert native.find_end(value.end) == idx.by_end[value.end]
+                assert native.find_end(value.end) == idx.find_end(value.end)
         assert native.span(((1, 2), (1, 10))) == idx.span(((1, 2), (1, 10)))
         assert native.find_start((0, 0)) is None
         assert native.find_end((0, 0)) is None
+
+
+def test_native_index_cycle_is_collected() -> None:
+    with parse_text("var x = 1;", "t.chpl") as result:
+        source = SourceText.from_text("var x = 1;")
+
+        def make_cycle() -> weakref.ReferenceType[TokenIndex]:
+            idx = TokenIndex.build(source, list(result.asts))
+            idx.roots.append(idx)
+            return weakref.ref(idx)
+
+        index_ref = make_cycle()
+        gc.collect()
+        assert index_ref() is None
+
+
+def test_native_index_build_preserves_lex_error() -> None:
+    source = SourceText.from_text("var x = $")
+    with pytest.raises(LexError) as expected:
+        tokenize(source)
+    with pytest.raises(LexError) as actual:
+        TokenIndex.build(source, [])
+    assert str(actual.value) == str(expected.value)
+    assert actual.value.offset == expected.value.offset
 
 
 # User parentheses

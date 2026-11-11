@@ -7,6 +7,7 @@ use chplfmt_core::index::{NodeId, TokenIndex as CoreIndex};
 use chplfmt_core::lexer::scan::{self, LexErrorKind};
 use chplfmt_core::lexer::token::{Token as CoreToken, TokenKind as CoreKind, NO_MATCH};
 use pyo3::class::basic::CompareOp;
+use pyo3::class::gc::{PyTraverseError, PyVisit};
 use pyo3::create_exception;
 use pyo3::exceptions::{PyException, PyValueError, PyZeroDivisionError};
 use pyo3::prelude::*;
@@ -283,6 +284,39 @@ impl NativeIndex {
 
 #[pymethods]
 impl NativeIndex {
+    #[new]
+    fn new(
+        py: Python<'_>,
+        source: &Bound<'_, PyAny>,
+        roots: &Bound<'_, PyAny>,
+        classify: &Bound<'_, PyAny>,
+        comment: &Bound<'_, PyAny>,
+        extern_block: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
+        build_index(py, source, roots, classify, comment, extern_block)
+    }
+
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        for node in &self.nodes {
+            visit.call(node)?;
+        }
+        visit.call(&self.id_of)?;
+        visit.call(&self.tokens)?;
+        visit.call(&self.source)?;
+        visit.call(&self.roots)?;
+        visit.call(&self.comment)?;
+        Ok(())
+    }
+
+    fn __clear__(&mut self, py: Python<'_>) {
+        self.nodes.clear();
+        self.id_of = PyDict::new(py).unbind();
+        self.tokens = PyList::empty(py).unbind();
+        self.source = py.None();
+        self.roots = py.None();
+        self.comment = py.None();
+    }
+
     #[getter]
     fn source(&self, py: Python<'_>) -> Py<PyAny> {
         self.source.clone_ref(py)
