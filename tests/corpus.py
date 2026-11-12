@@ -60,7 +60,7 @@ def corpus_files() -> list[Path]:
     """Every `.chpl` file under the corpus roots in this shard, sorted.
 
     Files from `$CHPL_HOME/test` are capped at `corpus_test_limit()` (chosen by a
-    stable hash); unparseable ones are skipped by `parsed()`.
+    stable hash).
     """
     home = chpl_home()
     limit = corpus_test_limit()
@@ -119,14 +119,25 @@ def sample_params(pinned: Iterable[str] = ()) -> list[object]:
 
 @contextmanager
 def parsed(path: Path) -> Iterator[tuple[SourceText, ParseResult]]:
-    """Read and parse `path`; skip the test if dyno reports errors."""
+    """Read and parse `path`; fail on unexpected parser errors."""
     try:
         source = SourceText.from_bytes(path.read_bytes())
     except SourceDecodeError as e:
         pytest.skip(f"not UTF-8: {e}")
     with parse_text(source.text, str(path)) as result:
         if result.errors:
-            pytest.skip(f"dyno reports {len(result.errors)} error(s)")
+            home = chpl_home()
+            if (
+                home is not None
+                and path == home / "modules/internal/ChapelBase.chpl"
+                and [(d.kind, d.message) for d in result.errors]
+                == [
+                    ("error", "'&&=' operator may not be overloaded"),
+                    ("error", "'||=' operator may not be overloaded"),
+                ]
+            ):
+                pytest.xfail("known ChapelBase.chpl operator overload errors")
+            pytest.fail(f"dyno reports {len(result.errors)} error(s): {path}")
         yield source, result
 
 

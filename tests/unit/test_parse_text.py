@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 
+import corpus
 from chplfmt import _chapel
 from chplfmt._chapel import Diagnostic, chapel, parse_text
 
@@ -57,6 +58,27 @@ def test_parse_errors_reported_against_logical_path() -> None:
     assert all(d.is_error for d in diags)
     assert str(diags[0]) == "src/bad.chpl:1:9: error: near ';'"
     assert diags[0].end_line == 1 and diags[0].end_col == 10
+
+
+@pytest.mark.parametrize(
+    ("name", "text"),
+    [
+        ("ChapelBase.chpl", "var x = ;\n"),
+        ("other.chpl", "operator &&=(ref lhs: bool, rhs: bool) { }\n"),
+    ],
+)
+def test_corpus_unexpected_parse_errors_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, text: str
+) -> None:
+    monkeypatch.setattr(corpus, "chpl_home", lambda: tmp_path)
+    path = tmp_path / "modules/internal" / name
+    path.parent.mkdir(parents=True)
+    path.write_text(text)
+    with (
+        pytest.raises(pytest.fail.Exception, match="dyno reports 1 error"),
+        corpus.parsed(path),
+    ):
+        pass
 
 
 def test_warnings_are_not_errors() -> None:
