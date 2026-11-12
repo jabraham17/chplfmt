@@ -21,6 +21,9 @@ def test_native_build_hash_tracks_sources_and_lock(tmp_path: Path) -> None:
     initial = _native_build_hash(root)
     (root / "target" / "output.rs").write_text("ignored")
     assert _native_build_hash(root) == initial
+    (root / "fuzz").mkdir()
+    (root / "fuzz" / "Cargo.lock").write_text("ignored fuzz lock")
+    assert _native_build_hash(root) == initial
     source.write_text("second")
     changed = _native_build_hash(root)
     assert changed != initial

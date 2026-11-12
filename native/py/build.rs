@@ -6,7 +6,10 @@ use sha2::{Digest, Sha256};
 fn collect_sources(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in fs::read_dir(dir)? {
         let path = entry?.path();
-        if path.file_name().is_some_and(|name| name == "target") {
+        if path
+            .file_name()
+            .is_some_and(|name| name == "target" || name == "fuzz")
+        {
             continue;
         }
         if path.is_dir() {

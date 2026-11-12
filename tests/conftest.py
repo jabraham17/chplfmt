@@ -12,7 +12,7 @@ def _native_build_hash(root: Path) -> str:
     digest = hashlib.sha256()
     sources = []
     for directory, subdirs, names in os.walk(root):
-        subdirs[:] = [name for name in subdirs if name != "target"]
+        subdirs[:] = [name for name in subdirs if name not in {"target", "fuzz"}]
         sources.extend(
             Path(directory) / name
             for name in names
