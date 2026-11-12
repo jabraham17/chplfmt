@@ -2,6 +2,7 @@
 name = "chplfmt-py"
 version.workspace = true
 edition.workspace = true
+build = "build.rs"
 
 [lib]
 name = "_native"
@@ -10,3 +11,6 @@ crate-type = ["cdylib"]
 [dependencies]
 chplfmt-core = { path = "../core" }
 pyo3 = { version = "0.25", features = ["abi3-py312"] }
+
+[build-dependencies]
+sha2 = "0.10"

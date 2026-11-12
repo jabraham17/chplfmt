@@ -620,6 +620,7 @@ fn display_width(text: &str, start_col: i64, tab_size: i64) -> PyResult<i64> {
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     doc::register(module)?;
     render::register(module)?;
+    module.add("__build__", env!("CHPLFMT_NATIVE_BUILD"))?;
     module.add_class::<PyTokenKind>()?;
     module.add_class::<PyToken>()?;
     module.add_class::<NativeIndex>()?;

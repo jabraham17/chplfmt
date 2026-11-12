@@ -1,6 +1,8 @@
 from collections.abc import Callable, Sequence
 from typing import Any, final
 
+__build__: str
+
 @final
 class TokenKind:
     IDENT: TokenKind
