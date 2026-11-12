@@ -24,8 +24,20 @@ pip install git+<repo-url>
 ```
 
 Source installs compile the native extension with maturin. Prebuilt
-`cp312-abi3` wheels, when available, work on CPython 3.12 and newer without
-installing Rust; formatting still needs the Chapel Python bindings.
+`cp312-abi3` wheels work on CPython 3.12 and newer without installing Rust.
+For a nightly, open this repository's GitHub Releases page, select the
+`nightly` prerelease, and download the wheel for your platform (Linux x86_64,
+Linux aarch64, or macOS arm64). In a directory containing only that downloaded
+wheel, install it with:
+
+```sh
+pip install --pre ./chplfmt-*.whl
+```
+
+The release also contains a source distribution and `SHA256SUMS`. Source
+installs still require Rust; formatting with either kind of install requires
+the Chapel Python bindings. Tagged releases have the same wheels without the
+nightly `.devYYYYMMDD` version suffix.
 
 ## Usage
 

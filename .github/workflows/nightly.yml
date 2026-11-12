@@ -1,0 +1,77 @@
+name: Nightly wheels
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: distribution-nightly
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.check.outputs.commit }}
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          commit=$(git rev-parse HEAD)
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          if gh release view nightly --json body --jq .body 2>/dev/null | grep -Fxq "Commit: $commit"; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  distribute:
+    needs: preflight
+    if: needs.preflight.outputs.changed == 'true'
+    uses: ./.github/workflows/distribution.yml
+    with:
+      channel: nightly
+      commit: ${{ needs.preflight.outputs.commit }}
+
+  publish:
+    needs: [preflight, distribute]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution-nightly-complete
+          path: dist
+      - name: Publish rolling nightly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          COMMIT: ${{ needs.preflight.outputs.commit }}
+        run: |
+          notes=$(printf 'Commit: %s\nDate: %s\nRun: %s\n' "$COMMIT" "$(date -u +%Y-%m-%d)" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+          if gh release view nightly >/dev/null 2>&1; then
+            gh release upload nightly dist/* --clobber
+            for asset in $(gh release view nightly --json assets --jq '.assets[].name'); do
+              if [[ ! -f "dist/$asset" ]]; then
+                gh release delete-asset nightly "$asset" --yes
+              fi
+            done
+            git push origin "$COMMIT:refs/tags/nightly" --force
+            gh release edit nightly --title 'Nightly' --notes "$notes" --prerelease
+          else
+            gh release create nightly --target "$COMMIT" --title 'Nightly' --notes "$notes" --prerelease dist/*
+          fi
+        shell: bash

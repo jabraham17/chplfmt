@@ -1,0 +1,35 @@
+name: Release wheels
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  distribute:
+    uses: ./.github/workflows/distribution.yml
+    with:
+      channel: release
+      commit: ${{ github.sha }}
+
+  publish:
+    needs: distribute
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution-release-complete
+          path: dist
+      - name: Publish tag release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          notes=$(printf 'Commit: %s\nDate: %s\nRun: %s\n' "$GITHUB_SHA" "$(date -u +%Y-%m-%d)" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID")
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes "$notes" dist/*
+        shell: bash

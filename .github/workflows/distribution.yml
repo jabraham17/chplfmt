@@ -1,0 +1,199 @@
+name: Distribution
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        required: true
+        type: string
+      commit:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_BUILD_JOBS: "4"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - id: version
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          base=$(cargo metadata --format-version 1 --no-deps --manifest-path native/Cargo.toml | jq -r '.packages[] | select(.name == "chplfmt-py") | .version')
+          test -n "$base"
+          if [[ "$CHANNEL" == nightly ]]; then
+            version="$base.dev$(date -u +%Y%m%d)"
+          elif [[ "$CHANNEL" == release && "$GITHUB_REF" == "refs/tags/v$base" ]]; then
+            version="$base"
+          else
+            echo 'Invalid distribution channel or release tag' >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  wheels:
+    name: Wheel (${{ matrix.platform }})
+    needs: prepare
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            wheel-tag: manylinux_2_28_x86_64
+          - platform: linux-aarch64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            wheel-tag: manylinux_2_28_aarch64
+          - platform: macos-arm64
+            runner: macos-14
+            target: aarch64-apple-darwin
+            wheel-tag: macosx_11_0_arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: astral-sh/setup-uv@v6
+      - name: Set distribution version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          uv python install 3.12
+          "$(uv python find 3.12)" native/tools/set_dist_version.py "$VERSION"
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.1"
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - name: Build manylinux wheel
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          manylinux: "2_28"
+          docker-options: --cpus 4 --memory 6g
+          args: --release --out dist --manifest-path native/py/Cargo.toml --interpreter python3.12
+      - name: Build macOS wheel
+        if: runner.os == 'macOS'
+        run: |
+          uv python install 3.12
+          uvx maturin build --release --out dist --manifest-path native/py/Cargo.toml --interpreter "$(uv python find 3.12)" --target aarch64-apple-darwin
+      - name: Test installed wheel without Chapel
+        env:
+          WHEEL_TAG: ${{ matrix.wheel-tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          uv python install 3.12
+          wheel=(dist/chplfmt-*-cp312-abi3-*"$WHEEL_TAG".whl)
+          test -f "${wheel[0]}"
+          test "${#wheel[@]}" -eq 1
+          uv venv --python 3.12 "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv" "${wheel[0]}" pytest pytest-xdist
+          "$RUNNER_TEMP/wheel-venv/bin/python" -c 'import chplfmt._native'
+          test "$("$RUNNER_TEMP/wheel-venv/bin/chplfmt" --version)" = "chplfmt $VERSION"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -m pytest -q -n 4 -m native \
+            tests/unit/test_config.py tests/unit/test_doc_render.py \
+            tests/unit/test_lexer.py tests/unit/test_native_doc.py \
+            tests/unit/test_source.py
+        shell: bash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution-${{ matrix.platform }}
+          path: dist/*.whl
+          retention-days: 14
+          if-no-files-found: error
+
+  sdist:
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: astral-sh/setup-uv@v6
+      - name: Build source distribution
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          uv python install 3.12
+          "$(uv python find 3.12)" native/tools/set_dist_version.py "$VERSION"
+          uvx maturin sdist --out dist --manifest-path native/py/Cargo.toml
+          test -f "dist/chplfmt-$VERSION.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution-sdist
+          path: dist/*.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  chapel:
+    name: Chapel wheel integration (Linux x86_64)
+    needs: [prepare, wheels]
+    runs-on: ubuntu-latest
+    container:
+      image: chapel/chapel:latest
+      options: --user root --cpus 4 --memory 6g
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: distribution-linux-x86_64
+          path: dist
+      - uses: astral-sh/setup-uv@v6
+      - name: Test installed wheel with Chapel
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          export CHPL_HOME="${CHPL_HOME:-$(chpl --print-chpl-home | awk '{print $1}')}"
+          test -d "$CHPL_HOME"
+          uv python install 3.12
+          uv venv --python 3.12 "$RUNNER_TEMP/chapel-venv"
+          uv pip install --python "$RUNNER_TEMP/chapel-venv" dist/*.whl pytest pytest-xdist
+          if ! "$RUNNER_TEMP/chapel-venv/bin/python" -c 'import chplfmt._chapel'; then
+            make -C "$CHPL_HOME" -j4 chapel-py-venv
+          fi
+          "$RUNNER_TEMP/chapel-venv/bin/python" -c 'import chplfmt._chapel, chplfmt._native'
+          test "$("$RUNNER_TEMP/chapel-venv/bin/chplfmt" --version)" = "chplfmt $VERSION"
+          "$RUNNER_TEMP/chapel-venv/bin/python" -m pytest -q -n 4 -m 'not corpus and not perf' tests/unit
+          "$RUNNER_TEMP/chapel-venv/bin/python" -m pytest -q -n 4 tests/golden tests/options
+        shell: bash
+
+  assemble:
+    needs: [prepare, wheels, sdist, chapel]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: distribution-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums and verify files
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          test "$(find dist -maxdepth 1 -name '*.whl' | wc -l)" -eq 3
+          test "$(find dist -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 1
+          test -f "dist/chplfmt-$VERSION.tar.gz"
+          (cd dist && sha256sum -- *.whl *.tar.gz > SHA256SUMS && sha256sum -c SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distribution-${{ inputs.channel }}-complete
+          path: dist/*
+          retention-days: 14
+          if-no-files-found: error
