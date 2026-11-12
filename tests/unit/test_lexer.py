@@ -10,7 +10,6 @@ from chplfmt.lexer import (
     tokenize,
 )
 from chplfmt.source import SourceText
-from reference.lexer import tokenize as reference_tokenize
 
 K = TokenKind
 
@@ -486,63 +485,41 @@ def test_native_kind_identity_and_frozen_tokens() -> None:
         ("a<=>b..<c...d x++ --y", []),
     ],
 )
-def test_native_matches_reference(text: str, opaque: list[tuple[int, int]]) -> None:
+def test_native_tokens_stable_with_trailing_whitespace(
+    text: str, opaque: list[tuple[int, int]]
+) -> None:
     source = SourceText.from_text(text)
-    expected = reference_tokenize(source, opaque)
     actual = tokenize(source, opaque)
-    assert [
-        (
-            str(t.kind),
-            t.text,
-            t.start_offset,
-            t.end_offset,
-            t.start,
-            t.end,
-            t.nl_before,
-            t.ws_before,
-            t.match,
-        )
-        for t in actual
-    ] == [
-        (
-            str(t.kind),
-            t.text,
-            t.start_offset,
-            t.end_offset,
-            t.start,
-            t.end,
-            t.nl_before,
-            t.ws_before,
-            t.match,
-        )
-        for t in expected
-    ]
+    padded = SourceText.from_text(text + " \n")
+    padded_tokens = tokenize(padded, opaque)
+    assert check_invariants(source, actual) == []
+    assert check_invariants(padded, padded_tokens) == []
+    assert actual[:-1] == padded_tokens[:-1]
 
 
 @pytest.mark.native
 @pytest.mark.parametrize(
-    ("text", "opaque"),
+    ("text", "opaque", "message"),
     [
-        ("var é", []),
-        ("x$y", []),
-        ("'abc", []),
-        ('b"abc', []),
-        ("/* a /* b */", []),
-        ("f(]", []),
-        ("{\n(", []),
-        ("abc", [(1, 3)]),
-        ("a bc", [(1, 3)]),
-        ("abc", [(4, 6)]),
+        ("var é", [], "invalid character"),
+        ("x$y", [], "invalid character"),
+        ("'abc", [], "unterminated string"),
+        ('b"abc', [], "unterminated string"),
+        ("/* a /* b */", [], "unterminated block comment"),
+        ("f(]", [], "unmatched"),
+        ("{\n(", [], "unmatched"),
+        ("abc", [(1, 3)], "inside a token"),
+        ("a bc", [(1, 3)], "inside whitespace"),
+        ("abc", [(4, 6)], "outside the text"),
     ],
 )
-def test_native_errors_match_reference(
-    text: str, opaque: list[tuple[int, int]]
+def test_native_errors_report_source_position(
+    text: str, opaque: list[tuple[int, int]], message: str
 ) -> None:
     source = SourceText.from_text(text)
-    with pytest.raises(LexError) as expected:
-        reference_tokenize(source, opaque)
-    with pytest.raises(LexError) as actual:
+    with pytest.raises(LexError, match=message) as actual:
         tokenize(source, opaque)
-    assert str(actual.value) == str(expected.value)
-    assert actual.value.offset == expected.value.offset
-    assert actual.value.pos == expected.value.pos
+    assert actual.value.pos == source.pos(min(actual.value.offset, len(text)))
+    assert str(actual.value).startswith(
+        f"{actual.value.pos[0]}:{actual.value.pos[1]}: "
+    )

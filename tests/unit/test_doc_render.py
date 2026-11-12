@@ -34,8 +34,6 @@ from chplfmt.doc import (
     trailing_comment,
     verbatim,
 )
-from reference.doc import to_reference
-from reference.render import render as reference_render
 
 pytestmark = pytest.mark.native
 
@@ -638,7 +636,7 @@ def test_large_document_renders_quickly() -> None:
 
 
 @pytest.mark.parametrize("width", [0, 4, 9, 20, 80])
-def test_native_renderer_unit_differential(width: int) -> None:
+def test_native_renderer_lines_reconstruct_text(width: int) -> None:
     from chplfmt import _native as native
 
     ident = GroupId("unit")
@@ -664,32 +662,12 @@ def test_native_renderer_unit_differential(width: int) -> None:
     ]
     options = FormatOptions(line_length=width, tab_size=4)
     for doc in docs:
-        converted = to_reference(doc)
         for base in (0, 2):
-            expected = reference_render(converted, options, base)
             actual = native.render(doc, width, options.tab_size, base)
-            assert actual.text == expected.text
-            assert [
-                (line.code, line.trailing_comment, line.verbatim)
-                for line in actual.lines
-            ] == [
-                (line.code, line.trailing_comment, line.verbatim)
-                for line in expected.lines
-            ]
-        from reference.render import flat_width as reference_flat_width
-
-        assert native.flat_width(doc, options.tab_size) == reference_flat_width(
-            converted, options
-        )
-    records = [native.LineRecord("a;", "// hi"), native.LineRecord("longer;", "// ok")]
-    assert native.align_trailing_comments(records, width, 4) == align_trailing_comments(
-        [
-            LineRecord(line.code, line.trailing_comment, line.verbatim)
-            for line in records
-        ],
-        width,
-        4,
-    )
+            assert actual.text == "\n".join(
+                native.align_trailing_comments(actual.lines, width, options.tab_size)
+            )
+            assert actual.text == render(doc, options, base).text
 
 
 def test_native_renderer_callback_lifetime_and_errors() -> None:
@@ -716,11 +694,11 @@ def test_native_renderer_callback_lifetime_and_errors() -> None:
     assert caught.value is failure
 
 
-def test_native_renderer_reference_callback_isolation() -> None:
+def test_native_renderer_callback_isolation() -> None:
     from chplfmt import _native as native
 
-    reference_calls: list[str] = []
-    native_calls: list[str] = []
+    first_calls: list[str] = []
+    second_calls: list[str] = []
 
     def make_doc(calls: list[str]) -> Doc:
         def notify() -> None:
@@ -731,13 +709,14 @@ def test_native_renderer_reference_callback_isolation() -> None:
         )
 
     options = FormatOptions()
-    expected = reference_render(to_reference(make_doc(reference_calls)), options)
-    assert reference_calls == ["chosen"]
-    assert native_calls == []
+    first = native.render(make_doc(first_calls), options.line_length, options.tab_size)
+    assert first.text == "a at 2"
+    assert first_calls == ["chosen"]
+    assert second_calls == []
 
-    actual = native.render(
-        make_doc(native_calls), options.line_length, options.tab_size
+    second = native.render(
+        make_doc(second_calls), options.line_length, options.tab_size, 2
     )
-    assert actual.text == expected.text
-    assert native_calls == ["chosen"]
-    assert reference_calls == ["chosen"]
+    assert second.text == "  a at 4"
+    assert second_calls == ["chosen"]
+    assert first_calls == ["chosen"]

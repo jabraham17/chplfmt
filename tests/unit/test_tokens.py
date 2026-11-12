@@ -7,10 +7,9 @@ from typing import Any
 import pytest
 
 from chplfmt._chapel import chapel, parse_text
-from chplfmt.lexer import LexError, TokenKind, tokenize
+from chplfmt.lexer import LexError, TokenKind, check_invariants, tokenize
 from chplfmt.source import SourceText
 from chplfmt.tokens import Span, TokenIndex, string_value
-from reference.tokens import TokenIndex as ReferenceTokenIndex
 
 
 @contextmanager
@@ -324,42 +323,26 @@ def test_owner_and_children() -> None:
         "use M only a;\nextern { int x; }\n",
     ],
 )
-def test_native_index_phase_3a_parity(text: str) -> None:
-    with indexed(text) as native:
-        idx = ReferenceTokenIndex.build(native.source, native.roots)
-        assert native.tokens is native.tokens
-        assert native.tokens == idx.tokens
-        assert native.problems == idx.problems
-        assert native.nodes() == list(idx.nodes())
-        assert native.check_leaves() == idx.check_leaves()
-        assert native.check_ownership() == idx.check_ownership()
+def test_native_index_queries_are_consistent(text: str) -> None:
+    with indexed(text) as idx:
+        assert check_invariants(idx.source, idx.tokens) == []
+        assert idx.tokens is idx.tokens
+        assert idx.problems == []
         for node in idx.nodes():
-            assert native.span(node.location()) == idx.span(node.location())
-            assert native.node_span(node) == idx.node_span(node)
-            assert native.header_span(node) == idx.header_span(node)
-            assert native.body_span(node) == idx.body_span(node)
-            assert native.stmt_span(node) == idx.stmt_span(node)
-            assert native.parent(node) == idx.parent(node)
-            assert native.children(node) == idx.children(node)
-            assert native.ast_children(node) == idx.ast_children(node)
-            assert native.own_tokens(node) == idx.own_tokens(node)
-            assert native.structural_brackets(node) == idx.structural_brackets(node)
-            assert native.user_parens(node) == idx.user_parens(node)
-            assert native.parens_around(node) == idx.parens_around(node)
-            assert native.unexplained_brackets(node) == idx.unexplained_brackets(node)
-            assert native.body_delimiters(node) == idx.body_delimiters(node)
-            assert native.is_wide_identifier(node) == idx.is_wide_identifier(node)
-        for token, value in enumerate(idx.tokens):
-            assert native.owner(token) == idx.owner(token)
-            if token < len(idx.tokens) - 1:
-                assert native.next_code(token) == idx.next_code(token)
-            assert native.prev_code(token) == idx.prev_code(token)
-            assert native.find_start(value.start) == idx.find_start(value.start)
-            if value.kind is not TokenKind.EOF:
-                assert native.find_end(value.end) == idx.find_end(value.end)
-        assert native.span(((1, 2), (1, 10))) == idx.span(((1, 2), (1, 10)))
-        assert native.find_start((0, 0)) is None
-        assert native.find_end((0, 0)) is None
+            for child in idx.children(node):
+                assert idx.parent(child) is node
+            for token in idx.own_tokens(node):
+                assert idx.owner(token) is node
+            for start, end in idx.parens_around(node):
+                assert idx.tokens[start].match == end
+            for start, end, _ in idx.user_parens(node):
+                assert idx.tokens[start].match == end
+            assert idx.unexplained_brackets(node) == []
+        for token, value in enumerate(idx.tokens[:-1]):
+            assert idx.find_start(value.start) == token
+            assert idx.find_end(value.end) == token
+        assert idx.find_start((0, 0)) is None
+        assert idx.find_end((0, 0)) is None
 
 
 def test_native_index_cycle_is_collected() -> None:

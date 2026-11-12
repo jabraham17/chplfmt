@@ -3,7 +3,6 @@ import sys
 import tomllib
 from pathlib import Path
 
-
 version = sys.argv[1]
 if not re.fullmatch(r"\d+\.\d+\.\d+(?:\.dev\d{8})?", version):
     raise SystemExit(f"Invalid distribution version: {version}")

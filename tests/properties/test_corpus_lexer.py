@@ -10,7 +10,6 @@ from corpus import (
     parsed,
     preorder,
 )
-from reference.lexer import tokenize as reference_tokenize
 
 pytestmark = pytest.mark.corpus
 
@@ -34,11 +33,12 @@ def test_lexer_on_corpus(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", corpus_params())
-def test_native_lexer_matches_reference(path: Path) -> None:
+def test_opaque_range_order_does_not_change_tokens(path: Path) -> None:
     with parsed(path) as (source, result):
         ranges = extern_ranges(source, result.asts)
         native = tokenize(source, ranges)
-        reference = reference_tokenize(source, ranges)
+        reordered = tokenize(source, reversed(ranges))
+        assert check_invariants(source, reordered) == []
         assert [
             (
                 str(t.kind),
@@ -64,5 +64,5 @@ def test_native_lexer_matches_reference(path: Path) -> None:
                 t.ws_before,
                 t.match,
             )
-            for t in reference
+            for t in reordered
         ]

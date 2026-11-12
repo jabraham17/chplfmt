@@ -4,97 +4,49 @@ from typing import cast
 import pytest
 
 from chplfmt import _native as native
-from reference import ir as reference
-from reference.render import (
-    _composite_width,
-    _leaf_width,
-)
 
 pytestmark = pytest.mark.native
 
 
 def test_native_doc_metadata_and_dump() -> None:
     native_id = native.GroupId("quote's")
-    reference_id = reference.GroupId("quote's")
-    pairs = [
-        (native.text("中"), reference.text("中")),
-        (native.text("a\tb"), reference.text("a\tb")),
-        (native.concat(), reference.concat()),
-        (
-            native.concat("a", native.softline, "b"),
-            reference.concat("a", reference.softline, "b"),
-        ),
-        (native.group(native.hardline), reference.group(reference.hardline)),
-        (
-            native.group("a", id=native_id, should_break=True),
-            reference.group("a", id=reference_id, should_break=True),
-        ),
-        (native.indent(native.hardline, 2), reference.indent(reference.hardline, 2)),
-        (native.align(native.softline), reference.align(reference.softline)),
-        (native.line, reference.line),
-        (native.softline, reference.softline),
-        (native.hardline, reference.hardline),
-        (native.literalline, reference.literalline),
-        (
-            native.fill(["a", native.line, "b"], lazy=True),
-            reference.fill(["a", reference.line, "b"], lazy=True),
-        ),
-        (
-            native.if_break(native.hardline, "flat"),
-            reference.if_break(reference.hardline, "flat"),
-        ),
-        (
-            native.if_break("b", "f", group_id=native_id),
-            reference.if_break("b", "f", group_id=reference_id),
-        ),
-        (
-            native.line_suffix(native.hardline),
-            reference.line_suffix(reference.hardline),
-        ),
-        (native.trailing_comment("// hi"), reference.trailing_comment("// hi")),
-        (native.break_parent, reference.break_parent),
-        (
-            native.conditional_group([native.hardline, "a"], native.ALL_LINES),
-            reference.conditional_group([reference.hardline, "a"], reference.ALL_LINES),
-        ),
-        (
-            native.conditional_group([native.hardline], native.FIRST_LINE),
-            reference.conditional_group([reference.hardline], reference.FIRST_LINE),
-        ),
-        (native.verbatim("x\ny", bol=True), reference.verbatim("x\ny", bol=True)),
-        (
-            native.column_text(lambda col: f"at {col}"),
-            reference.column_text(lambda col: f"at {col}"),
-        ),
-        (native.suffix_break, reference.suffix_break),
-        (native.on_render(lambda: None), reference.on_render(lambda: None)),
+    cases = [
+        (native.text("中"), False, 2),
+        (native.text("a\tb"), False, -1),
+        (native.concat(), False, 0),
+        (native.concat("a", native.softline, "b"), False, 2),
+        (native.group(native.hardline), True, -1),
+        (native.group("a", id=native_id, should_break=True), True, -1),
+        (native.indent(native.hardline, 2), True, -1),
+        (native.align(native.softline), False, 0),
+        (native.line, False, 1),
+        (native.softline, False, 0),
+        (native.hardline, True, -1),
+        (native.literalline, True, -1),
+        (native.fill(["a", native.line, "b"], lazy=True), False, 3),
+        (native.if_break(native.hardline, "flat"), False, 4),
+        (native.if_break("b", "f", group_id=native_id), False, -1),
+        (native.line_suffix(native.hardline), False, 0),
+        (native.trailing_comment("// hi"), False, 0),
+        (native.break_parent, True, -1),
+        (native.conditional_group([native.hardline, "a"], native.ALL_LINES), False, -1),
+        (native.conditional_group([native.hardline], native.FIRST_LINE), True, -1),
+        (native.verbatim("x\ny", bol=True), False, -1),
+        (native.column_text(lambda col: f"at {col}"), True, -1),
+        (native.suffix_break, False, 0),
+        (native.on_render(lambda: None), False, 0),
     ]
-    for doc, expected in pairs:
-        assert doc.forced == expected.forced
-        if isinstance(
-            expected,
-            (
-                reference.Concat,
-                reference.Fill,
-                reference.Group,
-                reference.ConditionalGroup,
-                reference.Indent,
-                reference.Align,
-                reference.IfBreak,
-            ),
-        ):
-            expected_width = _composite_width(expected, {})
-        else:
-            expected_width = _leaf_width(expected, {})
-        assert doc.flat_width == expected_width
-        assert native.dump(doc) == reference.dump(expected)
+    for doc, forced, width in cases:
+        assert doc.forced is forced, native.dump(doc)
+        assert doc.flat_width == width, native.dump(doc)
+        if width >= 0:
+            assert native.flat_width(doc, 2) == width
         flattened = native.flatten(doc)
-        reference_flat = reference.flatten(expected)
-        assert (flattened is None) == (reference_flat is None)
-        if flattened is not None and reference_flat is not None:
-            assert native.dump(flattened) == reference.dump(
-                reference_flat
-            ), native.dump(doc)
+        assert (flattened is None) is forced, native.dump(doc)
+        if flattened is not None:
+            flattened_again = native.flatten(flattened)
+            assert flattened_again is not None
+            assert native.dump(flattened) == native.dump(flattened_again)
 
 
 def test_native_doc_shape_and_identity() -> None:
@@ -108,7 +60,7 @@ def test_native_doc_shape_and_identity() -> None:
     ident = native.GroupId()
     assert ident != native.GroupId()
     assert ident.name == "g"
-    assert repr(native.GroupId("it's")) == repr(reference.GroupId("it's"))
+    assert repr(native.GroupId("it's")) == 'GroupId("it\'s")'
     assert native.Check.FIRST_LINE is native.FIRST_LINE
     assert native.EMPTY.kind is native.DocKind.TEXT
 

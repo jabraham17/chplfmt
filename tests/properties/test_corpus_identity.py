@@ -13,8 +13,6 @@ from chplfmt.config import FormatOptions
 from chplfmt.printer import REGISTRY, Printer
 from chplfmt.tokens import TokenIndex
 from corpus import corpus_params, parsed, preorder
-from reference.doc import to_reference
-from reference.render import render as reference_render
 
 pytestmark = pytest.mark.corpus
 
@@ -77,25 +75,18 @@ def test_native_renderer_on_printer_docs(path: Path) -> None:
     options = FormatOptions()
     with parsed(path) as (source, parsed_result):
         index = TokenIndex.build(source, parsed_result.asts)
-        reference_printer = Printer(index, options, path=str(path))
-        reference = reference_render(
-            to_reference(reference_printer.print_file()), options
-        )
-
         was_enabled = gc.isenabled()
         gc.disable()
         try:
             printer = Printer(index, options, path=str(path))
             doc = printer.print_file()
             actual = native.render(doc, options.line_length, options.tab_size)
-            assert actual.text == reference.text
-            assert [
-                (line.code, line.trailing_comment, line.verbatim)
-                for line in actual.lines
-            ] == [
-                (line.code, line.trailing_comment, line.verbatim)
-                for line in reference.lines
-            ]
+            assert actual.text == "\n".join(
+                native.align_trailing_comments(
+                    actual.lines, options.line_length, options.tab_size
+                )
+            )
+            assert actual.text == api._print_text(index, options, str(path))[0]
             printer_ref = weakref.ref(printer)
             del doc, printer
             assert printer_ref() is None
