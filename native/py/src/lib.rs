@@ -1,5 +1,6 @@
 mod doc;
 mod extract;
+mod render;
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -618,6 +619,7 @@ fn display_width(text: &str, start_col: i64, tab_size: i64) -> PyResult<i64> {
 #[pymodule]
 fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     doc::register(module)?;
+    render::register(module)?;
     module.add_class::<PyTokenKind>()?;
     module.add_class::<PyToken>()?;
     module.add_class::<NativeIndex>()?;

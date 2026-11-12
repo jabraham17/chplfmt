@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use chplfmt_core::doc::{
@@ -13,7 +14,7 @@ use pyo3::types::{PyAny, PyModule, PyTuple};
 #[pyclass(frozen, name = "Doc")]
 pub struct PyDoc {
     value: CoreDoc,
-    callback: Option<Py<PyAny>>,
+    callbacks: Arc<HashMap<usize, Py<PyAny>>>,
 }
 
 #[pyclass(frozen, name = "GroupId")]
@@ -233,7 +234,7 @@ fn handles(py: Python<'_>) -> &[Py<PyDoc>; 7] {
                 py,
                 PyDoc {
                     value: CONSTANTS[index].clone(),
-                    callback: None,
+                    callbacks: Arc::new(HashMap::new()),
                 },
             )
             .unwrap()
@@ -241,22 +242,52 @@ fn handles(py: Python<'_>) -> &[Py<PyDoc>; 7] {
     })
 }
 
-fn wrap(py: Python<'_>, value: CoreDoc) -> PyResult<Py<PyDoc>> {
+fn node_key(value: &CoreDoc) -> usize {
+    Arc::as_ptr(&value.0) as usize
+}
+
+fn wrap_with_callbacks(
+    py: Python<'_>,
+    value: CoreDoc,
+    callbacks: Arc<HashMap<usize, Py<PyAny>>>,
+) -> PyResult<Py<PyDoc>> {
     for (index, constant) in CONSTANTS.iter().enumerate() {
         if Arc::ptr_eq(&value.0, &constant.0) {
             return Ok(handles(py)[index].clone_ref(py));
         }
     }
-    Py::new(
-        py,
-        PyDoc {
-            value,
-            callback: None,
-        },
-    )
+    Py::new(py, PyDoc { value, callbacks })
 }
 
-fn doclike(value: &Bound<'_, PyAny>) -> PyResult<CoreDoc> {
+fn wrap(py: Python<'_>, value: CoreDoc) -> PyResult<Py<PyDoc>> {
+    wrap_with_callbacks(py, value, Arc::new(HashMap::new()))
+}
+
+fn collect_callbacks(
+    value: &Bound<'_, PyAny>,
+    callbacks: &mut HashMap<usize, Py<PyAny>>,
+) -> PyResult<()> {
+    if let Ok(doc) = value.extract::<PyRef<'_, PyDoc>>() {
+        for (key, callback) in doc.callbacks.iter() {
+            callbacks.insert(*key, callback.clone_ref(value.py()));
+        }
+    } else if !value.is_instance_of::<pyo3::types::PyString>() {
+        for part in value.try_iter()? {
+            collect_callbacks(&part?, callbacks)?;
+        }
+    }
+    Ok(())
+}
+
+fn wrap_from(py: Python<'_>, value: CoreDoc, sources: &[&Bound<'_, PyAny>]) -> PyResult<Py<PyDoc>> {
+    let mut callbacks = HashMap::new();
+    for source in sources {
+        collect_callbacks(source, &mut callbacks)?;
+    }
+    wrap_with_callbacks(py, value, Arc::new(callbacks))
+}
+
+pub(crate) fn doclike(value: &Bound<'_, PyAny>) -> PyResult<CoreDoc> {
     if let Ok(doc) = value.extract::<PyRef<'_, PyDoc>>() {
         return Ok(doc.value.clone());
     }
@@ -320,7 +351,7 @@ impl PyDoc {
                 py,
                 parts
                     .iter()
-                    .map(|part| wrap(py, part.clone()))
+                    .map(|part| wrap_with_callbacks(py, part.clone(), self.callbacks.clone()))
                     .collect::<PyResult<Vec<_>>>()?,
             )?
             .unbind()),
@@ -331,8 +362,9 @@ impl PyDoc {
     }
 
     fn unpack(&self, py: Python<'_>) -> PyResult<Py<PyTuple>> {
-        let child =
-            |doc: &CoreDoc| -> PyResult<Py<PyAny>> { Ok(wrap(py, doc.clone())?.into_any()) };
+        let child = |doc: &CoreDoc| -> PyResult<Py<PyAny>> {
+            Ok(wrap_with_callbacks(py, doc.clone(), self.callbacks.clone())?.into_any())
+        };
         let items: Vec<Py<PyAny>> = match &self.value.0.kind {
             Kind::Text { s, .. } | Kind::TrailingComment(s) => vec![s.as_ref().into_py_any(py)?],
             Kind::Concat(parts) => {
@@ -379,8 +411,8 @@ impl PyDoc {
             ],
             Kind::Verbatim { s, bol } => vec![s.as_ref().into_py_any(py)?, bol.into_py_any(py)?],
             Kind::ColumnText(_) | Kind::OnRender(_) => vec![self
-                .callback
-                .as_ref()
+                .callbacks
+                .get(&node_key(&self.value))
                 .map_or_else(|| py.None(), |cb| cb.clone_ref(py))],
             Kind::BreakParent | Kind::SuffixBreak => vec![],
         };
@@ -417,7 +449,11 @@ fn concat(py: Python<'_>, docs: &Bound<'_, PyTuple>) -> PyResult<Py<PyDoc>> {
         }
         return text(py, only.extract()?);
     }
-    wrap(py, CoreDoc::concat(doclikes(docs.as_any())?))
+    wrap_from(
+        py,
+        CoreDoc::concat(doclikes(docs.as_any())?),
+        &[docs.as_any()],
+    )
 }
 
 #[pyfunction(signature = (doc, id=None, should_break=false))]
@@ -427,25 +463,26 @@ fn group(
     id: Option<PyRef<'_, PyGroupId>>,
     should_break: bool,
 ) -> PyResult<Py<PyDoc>> {
-    wrap(
+    wrap_from(
         py,
         CoreDoc::group(doclike(doc)?, optional_id(id), should_break),
+        &[doc],
     )
 }
 
 #[pyfunction]
 fn indent(py: Python<'_>, doc: &Bound<'_, PyAny>, n: i32) -> PyResult<Py<PyDoc>> {
-    wrap(py, CoreDoc::indent(doclike(doc)?, n))
+    wrap_from(py, CoreDoc::indent(doclike(doc)?, n), &[doc])
 }
 
 #[pyfunction]
 fn align(py: Python<'_>, doc: &Bound<'_, PyAny>) -> PyResult<Py<PyDoc>> {
-    wrap(py, CoreDoc::align(doclike(doc)?))
+    wrap_from(py, CoreDoc::align(doclike(doc)?), &[doc])
 }
 
 #[pyfunction(signature = (parts, *, lazy=false))]
 fn fill(py: Python<'_>, parts: &Bound<'_, PyAny>, lazy: bool) -> PyResult<Py<PyDoc>> {
-    wrap(py, CoreDoc::fill(doclikes(parts)?, lazy))
+    wrap_from(py, CoreDoc::fill(doclikes(parts)?, lazy), &[parts])
 }
 
 #[pyfunction(signature = (broken, flat=None, group_id=None))]
@@ -455,16 +492,18 @@ fn if_break(
     flat: Option<&Bound<'_, PyAny>>,
     group_id: Option<PyRef<'_, PyGroupId>>,
 ) -> PyResult<Py<PyDoc>> {
-    let flat = flat.map_or_else(|| CoreDoc::text("").map_err(PyValueError::new_err), doclike)?;
-    wrap(
-        py,
-        CoreDoc::if_break(doclike(broken)?, flat, optional_id(group_id)),
-    )
+    let flat_doc =
+        flat.map_or_else(|| CoreDoc::text("").map_err(PyValueError::new_err), doclike)?;
+    let value = CoreDoc::if_break(doclike(broken)?, flat_doc, optional_id(group_id));
+    match flat {
+        Some(flat) => wrap_from(py, value, &[broken, flat]),
+        None => wrap_from(py, value, &[broken]),
+    }
 }
 
 #[pyfunction]
 fn line_suffix(py: Python<'_>, doc: &Bound<'_, PyAny>) -> PyResult<Py<PyDoc>> {
-    wrap(py, CoreDoc::line_suffix(doclike(doc)?))
+    wrap_from(py, CoreDoc::line_suffix(doclike(doc)?), &[doc])
 }
 
 #[pyfunction]
@@ -481,13 +520,14 @@ fn conditional_group(
     alts: &Bound<'_, PyAny>,
     check: Option<PyRef<'_, PyCheck>>,
 ) -> PyResult<Py<PyDoc>> {
-    wrap(
+    wrap_from(
         py,
         CoreDoc::conditional_group(
             doclikes(alts)?,
             check.map_or(CoreCheck::FirstLine, |check| check.value),
         )
         .map_err(PyValueError::new_err)?,
+        &[alts],
     )
 }
 
@@ -502,15 +542,11 @@ fn column_text(py: Python<'_>, make: Py<PyAny>) -> PyResult<Py<PyDoc>> {
         return Err(PyTypeError::new_err("make must be callable"));
     }
     let cb = make.clone_ref(py);
-    Py::new(
-        py,
-        PyDoc {
-            value: CoreDoc::column_text(Arc::new(move |col| {
-                Python::with_gil(|py| cb.call1(py, (col,))?.extract(py)).map_err(HostError::new)
-            })),
-            callback: Some(make),
-        },
-    )
+    let value = CoreDoc::column_text(Arc::new(move |col| {
+        Python::with_gil(|py| cb.call1(py, (col,))?.extract(py)).map_err(HostError::new)
+    }));
+    let callbacks = HashMap::from([(node_key(&value), make)]);
+    wrap_with_callbacks(py, value, Arc::new(callbacks))
 }
 
 #[pyfunction]
@@ -519,22 +555,18 @@ fn on_render(py: Python<'_>, fn_: Py<PyAny>) -> PyResult<Py<PyDoc>> {
         return Err(PyTypeError::new_err("fn must be callable"));
     }
     let cb = fn_.clone_ref(py);
-    Py::new(
-        py,
-        PyDoc {
-            value: CoreDoc::on_render(Arc::new(move || {
-                Python::with_gil(|py| cb.call0(py).map(|_| ())).map_err(HostError::new)
-            })),
-            callback: Some(fn_),
-        },
-    )
+    let value = CoreDoc::on_render(Arc::new(move || {
+        Python::with_gil(|py| cb.call0(py).map(|_| ())).map_err(HostError::new)
+    }));
+    let callbacks = HashMap::from([(node_key(&value), fn_)]);
+    wrap_with_callbacks(py, value, Arc::new(callbacks))
 }
 
 #[pyfunction]
 fn flatten(py: Python<'_>, doc: &Bound<'_, PyAny>) -> PyResult<Option<Py<PyDoc>>> {
     doclike(doc)?
         .flatten()
-        .map(|flat| wrap(py, flat))
+        .map(|flat| wrap_from(py, flat, &[doc]))
         .transpose()
 }
 

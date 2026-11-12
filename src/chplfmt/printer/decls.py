@@ -17,7 +17,7 @@ from chplfmt.doc import (
     hardline,
     text,
 )
-from chplfmt.doc.ir import Concat
+from chplfmt.doc.ir import DocKind
 from chplfmt.offregions import is_statement_list
 from chplfmt.printer.body import Body
 from chplfmt.printer.common import (
@@ -79,7 +79,7 @@ def _statement(p: Printer, node: Node, d: Doc) -> Doc:
 
 def _spaced(p: Printer, first: int, d: Doc) -> Doc:
     """`d` (starting at token `first`) preceded by a space unless it is tight."""
-    if isinstance(d, Concat) and not d.parts:
+    if d.kind is DocKind.CONCAT and not d.parts:
         return d
     return d if p.tokens[first].text in NO_SPACE_BEFORE else concat(" ", d)
 

@@ -4,8 +4,8 @@ from typing import cast
 import pytest
 
 from chplfmt import _native as native
-from chplfmt.doc import ir as reference
-from chplfmt.doc.render import (
+from reference import ir as reference
+from reference.render import (
     _composite_width,
     _leaf_width,
 )
@@ -135,6 +135,21 @@ def test_native_doc_builder_errors_and_callbacks() -> None:
         pass
 
     assert native.on_render(fn).unpack() == (fn,)
+
+
+def test_nested_native_doc_unpack_preserves_callbacks() -> None:
+    def make(col: int) -> str:
+        return f"at {col}"
+
+    def notify() -> None:
+        pass
+
+    doc = native.concat(
+        native.group(native.column_text(make)), native.on_render(notify)
+    )
+    group_doc, render_doc = doc.unpack()[0]
+    assert group_doc.unpack()[0].unpack() == (make,)
+    assert render_doc.unpack() == (notify,)
 
 
 def test_native_deep_drop() -> None:

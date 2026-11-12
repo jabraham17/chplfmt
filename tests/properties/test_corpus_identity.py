@@ -1,14 +1,20 @@
 """Idempotence on the corpus; identity up to whitespace where everything falls back."""
 
+import gc
+import weakref
 from pathlib import Path
 
 import pytest
 
+from chplfmt import _native as native
 from chplfmt import api
 from chplfmt._chapel import chapel
 from chplfmt.config import FormatOptions
-from chplfmt.printer import REGISTRY
+from chplfmt.printer import REGISTRY, Printer
+from chplfmt.tokens import TokenIndex
 from corpus import corpus_params, parsed, preorder
+from reference.doc import to_reference
+from reference.render import render as reference_render
 
 pytestmark = pytest.mark.corpus
 
@@ -64,3 +70,35 @@ def test_corpus_formats_idempotently(path: Path) -> None:
     if not printed:
         # Everything falls back: the output is the input up to whitespace.
         assert normalize(plain) == normalize(text)
+
+
+@pytest.mark.parametrize("path", corpus_params())
+def test_native_renderer_on_printer_docs(path: Path) -> None:
+    options = FormatOptions()
+    with parsed(path) as (source, parsed_result):
+        index = TokenIndex.build(source, parsed_result.asts)
+        reference_printer = Printer(index, options, path=str(path))
+        reference = reference_render(
+            to_reference(reference_printer.print_file()), options
+        )
+
+        was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            printer = Printer(index, options, path=str(path))
+            doc = printer.print_file()
+            actual = native.render(doc, options.line_length, options.tab_size)
+            assert actual.text == reference.text
+            assert [
+                (line.code, line.trailing_comment, line.verbatim)
+                for line in actual.lines
+            ] == [
+                (line.code, line.trailing_comment, line.verbatim)
+                for line in reference.lines
+            ]
+            printer_ref = weakref.ref(printer)
+            del doc, printer
+            assert printer_ref() is None
+        finally:
+            if was_enabled:
+                gc.enable()

@@ -6,6 +6,7 @@ from chplfmt.config import FormatOptions
 from chplfmt.doc import (
     ALL_LINES,
     FIRST_LINE,
+    Doc,
     DocLike,
     GroupId,
     LineRecord,
@@ -33,8 +34,8 @@ from chplfmt.doc import (
     trailing_comment,
     verbatim,
 )
-from chplfmt.doc.render import _Printer  # pyright: ignore[reportPrivateUsage]
-
+from reference.doc import to_reference
+from reference.render import render as reference_render
 
 def r(doc: DocLike, n: int = 80, tab: int = 2, base: int = 0) -> str:
     return render(doc, FormatOptions(line_length=n, tab_size=tab), base).text
@@ -422,27 +423,17 @@ def test_conditional_group_alternative_hardline_does_not_force_parents() -> None
     assert r(group(concat("p", line, forced))) == "p\na\nb"
 
 
-def test_conditional_group_memoized(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = 0
-    real = _Printer._all_lines_fit  # pyright: ignore[reportPrivateUsage]
-
-    def counting(*args: object) -> bool:
-        nonlocal calls
-        calls += 1
-        return real(*args)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(_Printer, "_all_lines_fit", counting)
-
+def test_conditional_group_memoized() -> None:
     def nest(k: int) -> DocLike:
         if k == 0:
             return "leafArgumentValue"
         return bracket_list("someFunction(", [nest(k - 1), "otherArgument"], ")")
 
     start = time.perf_counter()
-    out = r(nest(25))
+    result = render(nest(25), FormatOptions())
     assert time.perf_counter() - start < 1.0
-    assert calls < 500
-    assert max(len(s) for s in out.split("\n")) <= 80
+    assert result.stats.all_lines_dry_runs < 500
+    assert max(len(s) for s in result.text.split("\n")) <= 80
 
 
 # Layouts from design section 8
@@ -641,3 +632,109 @@ def test_large_document_renders_quickly() -> None:
     out = r(doc)
     assert time.perf_counter() - start < 1.0
     assert out.count("\n") >= 5000
+
+
+@pytest.mark.parametrize("width", [0, 4, 9, 20, 80])
+def test_native_renderer_unit_differential(width: int) -> None:
+    from chplfmt import _native as native
+
+    ident = GroupId("unit")
+    docs = [
+        group(concat("aaaa", line, "bbbb", if_break("!", "?", ident)), id=ident),
+        fill(
+            ["abc", line, group(concat("def", softline, "ghi")), line, "jkl"], lazy=True
+        ),
+        conditional_group(
+            [concat("aaa", hardline, "bbbb"), concat("ccc", hardline, "dd")],
+            ALL_LINES,
+        ),
+        concat("a", line_suffix(";"), hardline, verbatim("x  \t\ny", bol=True)),
+        concat(
+            "a;",
+            trailing_comment("// hi"),
+            hardline,
+            "longer;",
+            trailing_comment("// ok"),
+        ),
+        concat("abc", align(indent(concat(hardline, "x"), 2)), suffix_break),
+        concat("a", column_text(lambda col: f"at {col}\nnext")),
+    ]
+    options = FormatOptions(line_length=width, tab_size=4)
+    for doc in docs:
+        converted = to_reference(doc)
+        for base in (0, 2):
+            expected = reference_render(converted, options, base)
+            actual = native.render(doc, width, options.tab_size, base)
+            assert actual.text == expected.text
+            assert [
+                (line.code, line.trailing_comment, line.verbatim)
+                for line in actual.lines
+            ] == [
+                (line.code, line.trailing_comment, line.verbatim)
+                for line in expected.lines
+            ]
+        from reference.render import flat_width as reference_flat_width
+
+        assert native.flat_width(doc, options.tab_size) == reference_flat_width(
+            converted, options
+        )
+    records = [native.LineRecord("a;", "// hi"), native.LineRecord("longer;", "// ok")]
+    assert native.align_trailing_comments(records, width, 4) == align_trailing_comments(
+        [
+            LineRecord(line.code, line.trailing_comment, line.verbatim)
+            for line in records
+        ],
+        width,
+        4,
+    )
+
+
+def test_native_renderer_callback_lifetime_and_errors() -> None:
+    from chplfmt import _native as native
+
+    calls: list[str] = []
+    doc = conditional_group(
+        [
+            concat("a", on_render(lambda: calls.append("flat"))),
+            concat("a", hardline, on_render(lambda: calls.append("broken"))),
+        ],
+        check=ALL_LINES,
+    )
+    assert native.render(doc, 80, 2).text == "a"
+    assert calls == ["flat"]
+
+    failure = LookupError("same exception")
+
+    def fail(_col: int) -> str:
+        raise failure
+
+    with pytest.raises(LookupError) as caught:
+        native.render(concat("a", column_text(fail)), 80, 2)
+    assert caught.value is failure
+
+
+def test_native_renderer_reference_callback_isolation() -> None:
+    from chplfmt import _native as native
+
+    reference_calls: list[str] = []
+    native_calls: list[str] = []
+
+    def make_doc(calls: list[str]) -> Doc:
+        def notify() -> None:
+            calls.append("chosen")
+
+        return group(
+            concat("a ", column_text(lambda col: f"at {col}"), on_render(notify))
+        )
+
+    options = FormatOptions()
+    expected = reference_render(to_reference(make_doc(reference_calls)), options)
+    assert reference_calls == ["chosen"]
+    assert native_calls == []
+
+    actual = native.render(
+        make_doc(native_calls), options.line_length, options.tab_size
+    )
+    assert actual.text == expected.text
+    assert native_calls == ["chosen"]
+    assert reference_calls == ["chosen"]
