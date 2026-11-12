@@ -15,7 +15,13 @@ from corpus import corpus_params, parsed, preorder, sample_params
 pytestmark = pytest.mark.corpus
 
 
-@pytest.mark.parametrize("path", corpus_params())
+@pytest.mark.parametrize(
+    "path",
+    [
+        *corpus_params(),
+        *sorted((Path(__file__).resolve().parents[1] / "golden").rglob("*.chpl")),
+    ],
+)
 def test_curly_location_class_allowlist(path: Path) -> None:
     with parsed(path) as (_, result):
         for node in preorder(result.asts):

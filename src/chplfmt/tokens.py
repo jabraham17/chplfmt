@@ -48,6 +48,8 @@ _MAY_HAVE_CURLY = frozenset(
         "Record",
         "Select",
         "Serial",
+        "Sync",
+        "Union",
         "When",
         "While",
     }
