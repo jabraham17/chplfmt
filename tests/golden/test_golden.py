@@ -91,6 +91,8 @@ COVERED = frozenset(
         "Catch",
         "Select",
         "When",
+        "Match",
+        "MatchCase",
         "WithClause",
         "TaskVar",
         "ReduceIntent",

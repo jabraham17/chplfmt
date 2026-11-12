@@ -13,8 +13,6 @@ from chplfmt.printer.core import REGISTRY
 IGNORED = {
     "Comment": "comments come from tokens",
     "ErroneousExpression": "parse errors stop formatting",
-    "Match": "dyno has no parser rule for `match` (no accessors)",
-    "MatchCase": "dyno has no parser rule for `match` (no accessors)",
 }
 
 

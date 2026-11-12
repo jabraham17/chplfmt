@@ -43,6 +43,8 @@ _MAY_HAVE_CURLY = frozenset(
         "Interface",
         "Local",
         "Manage",
+        "Match",
+        "MatchCase",
         "Module",
         "On",
         "Record",

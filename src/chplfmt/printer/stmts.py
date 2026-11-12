@@ -315,6 +315,56 @@ def print_select(p: Printer, node: Node) -> Doc | None:
     return with_attributes(p, node, d)
 
 
+@printer(chapel.Match)
+def print_match(p: Printer, node: Node) -> Doc | None:
+    first = header_start(p, node)
+    open_tok = next(
+        (i for i in p.index.own_tokens(node) if p.tokens[i].text == "{"), None
+    )
+    if open_tok is None:
+        return None
+    header, broke = _match_header(p, node, node, first, open_tok)
+    cases = body_statements(p, node, open_tok)
+    d = attach_body(p, header, braced(p, node, open_tok, cases), header_ends_line=broke)
+    return with_attributes(p, node, d)
+
+
+@printer(chapel.MatchCase)
+def print_match_case(p: Printer, node: Node) -> Doc | None:
+    blk = _block_child(p, node)
+    if blk is None:
+        return None
+    first = header_start(p, node)
+    open_tok = open_brace(p, blk)
+    if open_tok is None:
+        do_tok = next(
+            (i for i in p.index.own_tokens(node) if p.tokens[i].text == "do"), None
+        )
+        if do_tok is None:
+            return None
+        hl = _before(p, do_tok)
+        header, broke = tokens_doc(p, node, first, hl)
+        return with_attributes(p, node, Body(p, node, hl, block=blk).doc(header, broke))
+    hl = _before(p, open_tok)
+    header, broke = _match_header(p, node, blk, first, open_tok)
+    return with_attributes(
+        p, node, Body(p, node, hl, block=blk, form="block").doc(header, broke)
+    )
+
+
+def _match_header(
+    p: Printer, node: Node, brace_owner: Node, first: int, open_tok: int
+) -> tuple[Doc, bool]:
+    header, broke = tokens_doc(p, node, first, _before(p, open_tok))
+    before = [c for c in p.dangling(brace_owner, "{") if c.token < open_tok]
+    if before:
+        header = concat(header, p.comments_after(before))
+        if before[-1].is_line:
+            header = concat(header, hardline)
+            broke = True
+    return header, broke
+
+
 def _block_child(p: Printer, node: Node) -> Node | None:
     return next(
         (k for k in p.index.children(node) if isinstance(k, chapel.Block)), None
