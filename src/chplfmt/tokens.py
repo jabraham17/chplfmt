@@ -25,6 +25,33 @@ _FIRST_PAREN = (
     chapel.Attribute,
     chapel.FunctionSignature,
 )
+_MAY_HAVE_CURLY = frozenset(
+    {
+        "Begin",
+        "Block",
+        "BracketLoop",
+        "Class",
+        "Cobegin",
+        "Coforall",
+        "Defer",
+        "DoWhile",
+        "Enum",
+        "For",
+        "Forall",
+        "Foreach",
+        "Function",
+        "Interface",
+        "Local",
+        "Manage",
+        "Module",
+        "On",
+        "Record",
+        "Select",
+        "Serial",
+        "When",
+        "While",
+    }
+)
 
 _CATEGORIES: tuple[tuple[int, type | tuple[type, ...]], ...] = (
     (0, _LEAVES),
@@ -90,7 +117,8 @@ def _native_class(cls: type) -> tuple[int, bool, int, bool, int]:
             )
             << 4
         )
-        | (int(issubclass(cls, chapel.SimpleBlockLike)) << 5),
+        | (int(issubclass(cls, chapel.SimpleBlockLike)) << 5)
+        | (int(cls.__name__ in _MAY_HAVE_CURLY) << 6),
     )
 
 

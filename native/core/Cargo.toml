@@ -2,3 +2,6 @@
 name = "chplfmt-core"
 version.workspace = true
 edition.workspace = true
+
+[dev-dependencies]
+proptest = "1"

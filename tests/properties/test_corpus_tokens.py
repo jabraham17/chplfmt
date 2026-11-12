@@ -1,3 +1,5 @@
+import gc
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -7,10 +9,37 @@ from chplfmt._chapel import parse_text
 from chplfmt.config import FormatOptions
 from chplfmt.lexer import TokenKind, check_invariants
 from chplfmt.source import SourceText
-from chplfmt.tokens import TokenIndex
-from corpus import corpus_params, parsed
+from chplfmt.tokens import _MAY_HAVE_CURLY, TokenIndex
+from corpus import corpus_params, parsed, preorder, sample_params
 
 pytestmark = pytest.mark.corpus
+
+
+@pytest.mark.parametrize("path", corpus_params())
+def test_curly_location_class_allowlist(path: Path) -> None:
+    with parsed(path) as (_, result):
+        for node in preorder(result.asts):
+            if type(node).__name__ not in _MAY_HAVE_CURLY:
+                assert node.curly_braces_location() is None, (path, type(node).__name__)
+
+
+@pytest.mark.parametrize("path", sample_params()[:1])
+def test_repeated_corpus_formatting_does_not_grow_traced_memory(path: Path) -> None:
+    with parsed(path) as (source, _):
+        text = source.text
+    tracemalloc.start()
+    try:
+        for _ in range(5):
+            api.format_text(text, path=str(path))
+        gc.collect()
+        baseline, _ = tracemalloc.get_traced_memory()
+        for _ in range(20):
+            api.format_text(text, path=str(path))
+        gc.collect()
+        current, _ = tracemalloc.get_traced_memory()
+        assert current - baseline < 128 * 1024, (baseline, current)
+    finally:
+        tracemalloc.stop()
 
 
 @pytest.mark.parametrize("path", corpus_params())

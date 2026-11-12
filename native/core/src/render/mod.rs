@@ -917,8 +917,113 @@ fn width_error(message: &'static str) -> HostError {
 #[cfg(test)]
 mod tests {
     use super::{align_trailing_comments, flat_width, render, LineRecord, RenderOptions};
-    use crate::doc::{Check, Doc, GroupId, HostError, LineKind};
+    use crate::doc::{Check, Doc, GroupId, HostError, Kind, LineKind};
+    use proptest::prelude::*;
+    use std::fmt;
     use std::sync::{Arc, Mutex};
+
+    #[derive(Clone)]
+    struct TestDoc(Doc);
+
+    impl fmt::Debug for TestDoc {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.dump().unwrap().fmt(formatter)
+        }
+    }
+
+    fn measured_flat_width(doc: &Doc, tab_size: u32) -> Option<i64> {
+        match &doc.0.kind {
+            Kind::Text { s, .. } => crate::width::display_width(s, 0, tab_size as i64).ok(),
+            Kind::Concat(parts) | Kind::Fill { parts, .. } => {
+                parts.iter().try_fold(0i64, |sum, part| {
+                    Some(sum + measured_flat_width(part, tab_size)?)
+                })
+            }
+            Kind::Group { contents, .. }
+            | Kind::Indent { contents, .. }
+            | Kind::Align(contents) => measured_flat_width(contents, tab_size),
+            Kind::Line(LineKind::Line) => Some(1),
+            Kind::Line(LineKind::Soft) => Some(0),
+            Kind::IfBreak { flat, .. } => measured_flat_width(flat, tab_size),
+            Kind::ConditionalGroup { alts, .. } => measured_flat_width(&alts[0], tab_size),
+            Kind::LineSuffix(_)
+            | Kind::TrailingComment(_)
+            | Kind::SuffixBreak
+            | Kind::OnRender(_) => Some(0),
+            _ => None,
+        }
+    }
+
+    fn doc_tree() -> impl Strategy<Value = TestDoc> {
+        let leaf = prop_oneof![
+            prop::sample::select(vec!["", "x", "wide", "中", "x  ", "\t"])
+                .prop_map(|value| TestDoc(Doc::text(value).unwrap())),
+            prop::sample::select(vec![
+                LineKind::Line,
+                LineKind::Soft,
+                LineKind::Hard,
+                LineKind::Literal,
+            ])
+            .prop_map(|kind| TestDoc(Doc::line(kind))),
+            Just(TestDoc(Doc::verbatim("raw  \n  raw\t", false))),
+            Just(TestDoc(Doc::break_parent())),
+            Just(TestDoc(Doc::suffix_break())),
+        ];
+        leaf.prop_recursive(4, 64, 4, |inner| {
+            prop_oneof![
+                proptest::collection::vec(inner.clone(), 0..5).prop_map(|parts| TestDoc(
+                    Doc::concat(parts.into_iter().map(|part| part.0).collect())
+                )),
+                (
+                    proptest::collection::vec(inner.clone(), 0..5),
+                    any::<bool>()
+                )
+                    .prop_map(|(parts, lazy)| TestDoc(Doc::fill(
+                        parts.into_iter().map(|part| part.0).collect(),
+                        lazy
+                    ))),
+                (inner.clone(), any::<bool>()).prop_map(|(doc, should_break)| TestDoc(Doc::group(
+                    doc.0,
+                    None,
+                    should_break
+                ))),
+                (inner.clone(), 0..5i32)
+                    .prop_map(|(doc, depth)| TestDoc(Doc::indent(doc.0, depth))),
+                inner.clone().prop_map(|doc| TestDoc(Doc::align(doc.0))),
+                (inner.clone(), inner.clone())
+                    .prop_map(|(broken, flat)| TestDoc(Doc::if_break(broken.0, flat.0, None))),
+                proptest::collection::vec(inner.clone(), 1..4).prop_map(|alts| TestDoc(
+                    Doc::conditional_group(
+                        alts.into_iter().map(|alt| alt.0).collect(),
+                        Check::FirstLine
+                    )
+                    .unwrap()
+                )),
+                inner.prop_map(|doc| TestDoc(Doc::line_suffix(doc.0))),
+            ]
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        #[test]
+        fn random_doc_render_and_flat_width(doc in doc_tree(), length in 1..100u32, tab_size in 1..9u32) {
+            let doc = doc.0;
+            let opts = RenderOptions { line_length: length, tab_size };
+            let result = render(&doc, opts, 0).unwrap();
+            for line in &result.lines {
+                if !line.verbatim {
+                    prop_assert!(!line.code.ends_with([' ', '\t']));
+                }
+            }
+            if doc.0.flat_width >= 0 {
+                let width = measured_flat_width(&doc, tab_size).unwrap();
+                prop_assert_eq!(doc.0.flat_width as i64, width);
+                prop_assert_eq!(flat_width(&doc, tab_size).unwrap(), Some(width as u32));
+            }
+        }
+    }
 
     fn text(s: &str) -> Doc {
         Doc::text(s).unwrap()

@@ -118,7 +118,11 @@ pub fn walk(
                 Err(error) => Some(Err(error)),
             })
             .collect::<PyResult<_>>()?;
-        let curly = optional_location(node, "curly_braces_location")?;
+        let curly = if class.flags & (1 << 6) != 0 {
+            optional_location(node, "curly_braces_location")?
+        } else {
+            None
+        };
         let extra = Extra {
             implicit_module: class.base == BaseRule::Module
                 && node.call_method0("kind")?.eq("implicit")?,

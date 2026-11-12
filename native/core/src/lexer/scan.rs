@@ -368,6 +368,101 @@ pub fn lex<'s>(text: &'s str, opaque: &[(usize, usize)]) -> Result<Tokens<'s>, L
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    fn naive_pos(text: &str) -> Pos {
+        let mut pos = Pos { line: 1, col: 1 };
+        for byte in text.bytes() {
+            if byte == b'\n' {
+                pos.line += 1;
+                pos.col = 1;
+            } else {
+                pos.col += 1;
+            }
+        }
+        pos
+    }
+
+    fn check_lex(text: &str) -> Result<(), TestCaseError> {
+        let Ok(tokens) = lex(text, &[]) else {
+            return Ok(());
+        };
+        let mut reconstructed = String::new();
+        let mut cursor = 0;
+        let mut stack = Vec::new();
+        for (index, token) in tokens.toks.iter().enumerate() {
+            prop_assert!(cursor <= token.start_byte as usize);
+            prop_assert!(token.start_byte <= token.end_byte);
+            let gap = &text[cursor..token.start_byte as usize];
+            prop_assert!(gap.bytes().all(|byte| b" \t\r\n\x0c".contains(&byte)));
+            prop_assert_eq!(token.ws_before, !gap.is_empty());
+            prop_assert_eq!(
+                token.nl_before,
+                gap.bytes().filter(|byte| *byte == b'\n').count() as u32
+            );
+            reconstructed.push_str(gap);
+            reconstructed.push_str(tokens.text(index));
+            cursor = token.end_byte as usize;
+            prop_assert_eq!(
+                token.start_cp as usize,
+                text[..token.start_byte as usize].chars().count()
+            );
+            prop_assert_eq!(token.end_cp as usize, text[..cursor].chars().count());
+            prop_assert_eq!(token.start, naive_pos(&text[..token.start_byte as usize]));
+            prop_assert_eq!(token.end, naive_pos(&text[..cursor]));
+            match tokens.text(index) {
+                "(" | "[" | "{" if token.kind == TokenKind::Punct => stack.push(index),
+                ")" | "]" | "}" if token.kind == TokenKind::Punct => {
+                    prop_assert!(!stack.is_empty());
+                    let open = stack.pop().unwrap();
+                    let expected = match tokens.text(index) {
+                        ")" => "(",
+                        "]" => "[",
+                        _ => "{",
+                    };
+                    prop_assert_eq!(tokens.text(open), expected);
+                    prop_assert_eq!(tokens.toks[open].partner, index as u32);
+                    prop_assert_eq!(token.partner, open as u32);
+                }
+                _ => prop_assert_eq!(token.partner, NO_MATCH),
+            }
+        }
+        prop_assert!(stack.is_empty());
+        prop_assert_eq!(cursor, text.len());
+        prop_assert_eq!(reconstructed, text);
+        prop_assert_eq!(tokens.toks.last().unwrap().kind, TokenKind::Eof);
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(128))]
+
+        #[test]
+        fn random_utf8_reconstructs_input(text in ".{0,160}") {
+            check_lex(&text)?;
+        }
+
+        #[test]
+        fn random_bytes_never_panic(bytes in proptest::collection::vec(any::<u8>(), 0..160)) {
+            let text = String::from_utf8_lossy(&bytes);
+            check_lex(&text)?;
+        }
+
+        #[test]
+        fn random_chapel_characters(text in "[a-zA-Z0-9_{}()\\[\\] ;+*/='\"\\n\\t]{0,160}") {
+            check_lex(&text)?;
+        }
+
+        #[test]
+        fn valid_unicode_tokens(
+            contents in "[a-zA-Z0-9 中😀]{0,32}",
+            identifiers in proptest::collection::vec("[a-z_][a-z0-9_]{0,8}", 0..20),
+        ) {
+            let text = format!("f(\"{contents}\")\n{}", identifiers.join(" (x) \n"));
+            prop_assert!(lex(&text, &[]).is_ok());
+            check_lex(&text)?;
+        }
+    }
 
     #[test]
     fn offsets_and_brackets() {
