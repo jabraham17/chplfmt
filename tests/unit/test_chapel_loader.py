@@ -1,3 +1,4 @@
+import importlib
 import os
 import shutil
 import subprocess
@@ -171,6 +172,78 @@ def test_load_uses_plain_import_first(clean_env: pytest.MonkeyPatch) -> None:
     assert run.calls == []
 
 
+def test_load_prefers_selected_home_over_importable_chapel(
+    clean_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home, _ = make_chpl_home(tmp_path / "selected")
+    directory = make_chapel_py(tmp_path / "selected-deps")
+    clean_env.setenv("CHPL_HOME", str(home))
+    clean_env.setattr(_chapel.subprocess, "run", FakeRun(f"{directory}\n"))
+    installed = fake_chapel("2.10.0")
+    selected = fake_chapel("2.11.0")
+
+    def import_module(name: str) -> ModuleType:
+        assert name == "chapel"
+        return selected if str(directory) in sys.path else installed
+
+    assert load_chapel(import_module)[0] is selected
+
+
+def test_load_ignores_cached_chapel_from_other_home(
+    clean_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home, _ = make_chpl_home(tmp_path / "selected")
+    directory = make_chapel_py(tmp_path / "selected-deps")
+    (directory / "chapel" / "__init__.py").write_text(
+        "class Context:\n"
+        "    def get_compiler_version(self):\n"
+        "        return '2.11.0'\n"
+    )
+    clean_env.setenv("CHPL_HOME", str(home))
+    clean_env.setattr(_chapel.subprocess, "run", FakeRun(f"{directory}\n"))
+    stale = fake_chapel("2.10.0")
+    stale.__file__ = str(tmp_path / "old" / "chapel" / "__init__.py")
+    clean_env.setitem(sys.modules, "chapel", stale)
+
+    module, version = load_chapel(importlib.import_module)
+    assert module.__file__ == str(directory / "chapel" / "__init__.py")
+    assert version == "2.11.0"
+
+
+def test_load_follows_chpl_when_path_changes(
+    clean_env: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    homes = [make_chpl_home(tmp_path / name)[0] for name in ("first", "second")]
+    directories = [make_chapel_py(tmp_path / name) for name in ("deps1", "deps2")]
+    modules = [fake_chapel(version) for version in ("2.10.0", "2.11.0")]
+    current = 0
+
+    def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        index = 0 if "first" in cmd[0] or "first" in cmd[1] else 1
+        output = (
+            f"export CHPL_HOME='{homes[index]}'\n"
+            if cmd[-1] == "--print-bootstrap-commands"
+            else f"{directories[index]}\n"
+        )
+        return subprocess.CompletedProcess(cmd, 0, output, "")
+
+    def import_module(name: str) -> ModuleType:
+        assert name == "chapel"
+        for path in sys.path:
+            if path in (str(directories[0]), str(directories[1])):
+                return modules[directories.index(Path(path))]
+        raise ImportError("No module named 'chapel'")
+
+    clean_env.setattr(_chapel.subprocess, "run", run)
+    clean_env.setattr(
+        _chapel.shutil, "which", lambda name: str(homes[current] / "bin" / "chpl")
+    )
+    assert load_chapel(import_module)[0] is modules[0]
+    current = 1
+    assert load_chapel(import_module)[0] is modules[1]
+    assert os.environ["CHPL_HOME"] == str(homes[1])
+
+
 def test_load_sets_chpl_home_for_context(clean_env: pytest.MonkeyPatch) -> None:
     # chapel.Context() needs CHPL_HOME even when 'import chapel' works.
     run = FakeRun(BOOTSTRAP)
@@ -202,7 +275,7 @@ def test_load_derives_chpl_home_from_module_path(
     assert load_chapel(lambda name: module)[0] is module
     assert os.environ["CHPL_HOME"] == str(home)
     assert os.environ["CHPL_THIRD_PARTY"] == str(home / "third-party")
-    assert run.calls == []
+    assert len(run.calls) == 1
 
 
 def test_load_module_path_without_helper_falls_back_to_chpl(

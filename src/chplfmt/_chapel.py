@@ -24,6 +24,7 @@ _HINT = (
     "or set CHPL_HOME, or put 'chpl' on PATH"
 )
 _SUBPROCESS_TIMEOUT = 120
+_discovered_env: dict[str, str] = {}
 
 
 class ChapelEnvironmentError(ImportError):
@@ -50,7 +51,7 @@ def parse_bootstrap_commands(output: str) -> dict[str, str]:
 def find_chpl_home(steps: list[str]) -> tuple[str, dict[str, str]] | None:
     """Return CHPL_HOME and the variables to pass to chpl_home_utils.py."""
     home = os.environ.get("CHPL_HOME")
-    if home:
+    if home and home != _discovered_env.get("CHPL_HOME"):
         steps.append(f"CHPL_HOME from the environment: {home}")
         return home, {"CHPL_HOME": home}
     steps.append("CHPL_HOME is not set in the environment")
@@ -111,25 +112,31 @@ def chapel_py_dir(
 
 def _set_env_defaults(env_vars: dict[str, str]) -> None:
     for name, value in env_vars.items():
-        os.environ.setdefault(name, value)
+        if name not in os.environ or os.environ[name] == _discovered_env.get(name):
+            os.environ[name] = value
+            _discovered_env[name] = value
 
 
 def _import_chapel(
-    import_module: Callable[[str], ModuleType], steps: list[str]
+    import_module: Callable[[str], ModuleType],
+    steps: list[str],
+    discovered: list[tuple[str, dict[str, str]]],
 ) -> ModuleType:
-    try:
-        return import_module("chapel")
-    except ImportError as e:
-        steps.append(f"import chapel: {e}")
-
     override = os.environ.get("CHPLFMT_CHAPEL_PY")
     directory: str | None = None
     if override:
         steps.append(f"CHPLFMT_CHAPEL_PY={override}")
         directory = override
     elif found := find_chpl_home(steps):
-        _set_env_defaults(found[1])
+        discovered.append(found)
         directory = chapel_py_dir(found[0], found[1], steps)
+        if directory is not None:
+            _set_env_defaults(found[1])
+    if directory is None:
+        try:
+            return import_module("chapel")
+        except ImportError as e:
+            steps.append(f"import chapel: {e}")
     if directory is None:
         raise ChapelEnvironmentError(
             "could not find the Chapel Python bindings (chapel-py)", steps, _HINT
@@ -143,13 +150,34 @@ def _import_chapel(
     # Append, so older packages bundled next to chapel-py don't shadow ours.
     if directory not in sys.path:
         sys.path.append(directory)
+    stale: dict[str, ModuleType] = {}
+    if import_module is importlib.import_module:
+        cached = sys.modules.get("chapel")
+        if cached is not None and os.path.realpath(
+            getattr(cached, "__file__", "")
+        ) != os.path.realpath(init):
+            stale = {
+                name: module
+                for name, module in tuple(sys.modules.items())
+                if name == "chapel" or name.startswith("chapel.")
+            }
+            for name in stale:
+                del sys.modules[name]
+    sys.path.insert(0, directory)
     try:
         return import_module("chapel")
     except ImportError as e:
+        if stale:
+            for name in tuple(sys.modules):
+                if name == "chapel" or name.startswith("chapel."):
+                    del sys.modules[name]
+            sys.modules.update(stale)
         steps.append(f"import chapel from {directory}: {e}")
         raise ChapelEnvironmentError(
             "could not load the Chapel Python bindings (chapel-py)", steps, _HINT
         ) from e
+    finally:
+        sys.path.pop(0)
 
 
 def _home_of_module(
@@ -172,10 +200,12 @@ def load_chapel(
 ) -> tuple[ModuleType, str]:
     """Import chapel-py (searching for it if needed); return it and the Chapel version."""
     steps: list[str] = []
-    module = _import_chapel(import_module, steps)
+    discovered: list[tuple[str, dict[str, str]]] = []
+    module = _import_chapel(import_module, steps, discovered)
     # chapel.Context() raises "CHPL_HOME must be set" without it.
     if not os.environ.get("CHPL_HOME") and (
-        found := _home_of_module(module, steps) or find_chpl_home(steps)
+        found := _home_of_module(module, steps)
+        or (discovered[0] if discovered else find_chpl_home(steps))
     ):
         _set_env_defaults(found[1])
     try:
