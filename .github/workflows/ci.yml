@@ -17,6 +17,7 @@ concurrency:
 
 env:
   FORCE_COLOR: "1"
+  CARGO_BUILD_JOBS: "4"
   # Pull requests use the sampled corpus for the per-profile properties.
   CHPLFMT_FULL_CORPUS: ${{ github.event_name != 'pull_request' && '1' || '0' }}
   # Cap on files taken from $CHPL_HOME/test, when the image has it.
@@ -51,11 +52,44 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup
         with:
-          python: "3"
+          python: "3.12"
           image-digest: ${{ fromJSON(needs.images.outputs.digests).latest }}
       - run: ruff check .
       - run: black --check .
       - run: pyright
+      - run: python native/tools/gen_width_table.py --check
+      - run: cargo fmt --manifest-path native/Cargo.toml --all --check
+      - run: cargo clippy --manifest-path native/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo test --manifest-path native/Cargo.toml --workspace --all-targets
+
+  native-smoke:
+    name: Native wheel smoke (no chapel-py)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+      - uses: astral-sh/setup-uv@v6
+      - name: Build abi3 wheel
+        run: |
+          uv python install 3.12
+          uvx maturin build --manifest-path native/py/Cargo.toml --release --interpreter "$(uv python find 3.12)" --out "$RUNNER_TEMP/wheels"
+          wheel=("$RUNNER_TEMP"/wheels/chplfmt-*-cp312-abi3-*.whl)
+          test -f "${wheel[0]}"
+          echo "WHEEL=${wheel[0]}" >> "$GITHUB_ENV"
+        shell: bash
+      - name: Test wheel without Chapel
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv" "$WHEEL" pytest pytest-xdist
+          "$RUNNER_TEMP/wheel-venv/bin/python" -m pytest -q -n 4 -m native \
+            tests/unit/test_config.py tests/unit/test_doc_render.py \
+            tests/unit/test_lexer.py tests/unit/test_native_doc.py \
+            tests/unit/test_source.py
 
   test:
     name: Tests (Chapel ${{ matrix.chapel }}, Python ${{ matrix.python }})

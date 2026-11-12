@@ -15,6 +15,8 @@ from chplfmt.config import (
     to_yaml,
 )
 
+pytestmark = pytest.mark.native
+
 
 def write(path: Path, text: str) -> Path:
     path.write_text(text, encoding="utf-8")

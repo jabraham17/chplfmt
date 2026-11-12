@@ -1,6 +1,5 @@
 import pytest
 
-from chplfmt._chapel import chapel, parse_text
 from chplfmt.lexer import (
     PUNCTUATION,
     LexError,
@@ -34,6 +33,8 @@ def texts(text: str) -> list[str]:
 
 def dyno_leaves(text: str) -> list[tuple[str, tuple[int, int], tuple[int, int]]]:
     """(class name, start, end) of every Identifier and literal dyno reports."""
+    from chplfmt._chapel import chapel, parse_text
+
     with parse_text(text, "t.chpl") as r:
         assert r.errors == []
         return [
@@ -394,6 +395,8 @@ def test_utf8_byte_columns() -> None:
 
 
 def test_extern_block_is_opaque() -> None:
+    from chplfmt._chapel import chapel, parse_text
+
     text = 'extern {\n  int f(void) { return "}"; } /* ( */\n}\nvar x = (1);\n'
     end = text.index("}\nvar") + 1
     tokens = lex(text, [(0, end)])
@@ -467,6 +470,7 @@ def test_native_kind_identity_and_frozen_tokens() -> None:
         setattr(tokens[0], field, "changed")
 
 
+@pytest.mark.native
 @pytest.mark.parametrize(
     ("text", "opaque"),
     [
@@ -515,6 +519,7 @@ def test_native_matches_reference(text: str, opaque: list[tuple[int, int]]) -> N
     ]
 
 
+@pytest.mark.native
 @pytest.mark.parametrize(
     ("text", "opaque"),
     [

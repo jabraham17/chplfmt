@@ -13,12 +13,19 @@ check fails, the file is left unchanged.
   found automatically through `$CHPL_HOME`, or through `chpl` on `PATH`. Set
   `CHPLFMT_CHAPEL_PY` to the directory that contains `chapel/` to override.
 - Python 3.12 or newer.
+- A Rust toolchain for source installs (including editable installs). Install
+  [rustup](https://rustup.rs/); the workspace selects Rust 1.85.1 from
+  `native/rust-toolchain.toml`.
 
 ## Installation
 
 ```sh
 pip install git+<repo-url>
 ```
+
+Source installs compile the native extension with maturin. Prebuilt
+`cp312-abi3` wheels, when available, work on CPython 3.12 and newer without
+installing Rust; formatting still needs the Chapel Python bindings.
 
 ## Usage
 
@@ -108,13 +115,28 @@ workspace root) and is meant to run next to chpl-language-server.
 
 ## Development
 
+Install rustup first, then run these commands from the repository root:
+
 ```sh
+rustup toolchain install 1.85.1 --profile minimal --component clippy rustfmt
+export CARGO_BUILD_JOBS=4
 uv venv --python 3.12 .venv
 uv pip install --python .venv -e '.[dev]'
 .venv/bin/ruff check . && .venv/bin/black --check . && .venv/bin/pyright
+.venv/bin/python native/tools/gen_width_table.py --check
+cargo fmt --manifest-path native/Cargo.toml --all --check
+cargo clippy --manifest-path native/Cargo.toml --workspace --all-targets -- -D warnings
+cargo test --manifest-path native/Cargo.toml --workspace --all-targets
+.venv/bin/python -m pytest -q -n 4 -m native \
+  tests/unit/test_config.py tests/unit/test_doc_render.py \
+  tests/unit/test_lexer.py tests/unit/test_native_doc.py \
+  tests/unit/test_source.py
 .venv/bin/python -m pytest -n 4 -m "not corpus"   # fast tests
 .venv/bin/python -m pytest -n 4                   # include corpus properties
 ```
+
+The `native` marker selects tests that do not need chapel-py. The full test
+suite and the formatter still require Chapel and its Python bindings.
 
 - Golden tests live in `tests/golden/<area>/` and option tests in
   `tests/options/<option>/<value>/`; `pytest --update-goldens` rewrites the

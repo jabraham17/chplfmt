@@ -10,6 +10,8 @@ from reference.render import (
     _leaf_width,
 )
 
+pytestmark = pytest.mark.native
+
 
 def test_native_doc_metadata_and_dump() -> None:
     native_id = native.GroupId("quote's")

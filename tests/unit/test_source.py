@@ -13,6 +13,8 @@ from chplfmt.source import (
     display_width,
 )
 
+pytestmark = pytest.mark.native
+
 
 def test_immutable() -> None:
     src = SourceText.from_text("a\n")

@@ -37,6 +37,9 @@ from chplfmt.doc import (
 from reference.doc import to_reference
 from reference.render import render as reference_render
 
+pytestmark = pytest.mark.native
+
+
 def r(doc: DocLike, n: int = 80, tab: int = 2, base: int = 0) -> str:
     return render(doc, FormatOptions(line_length=n, tab_size=tab), base).text
 

@@ -21,10 +21,32 @@ runs:
         echo "CHPL_HOME=$home" >> "$GITHUB_ENV"
         chpl --version | head -1
 
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ~/.rustup/toolchains
+          ~/.cargo/registry
+          ~/.cargo/git
+          native/target
+        key: rust-${{ runner.os }}-${{ runner.arch }}-${{ inputs.image-digest }}-${{ hashFiles('native/Cargo.lock', 'native/rust-toolchain.toml') }}
+        restore-keys: rust-${{ runner.os }}-${{ runner.arch }}-${{ inputs.image-digest }}-
+
+    - name: Install Rust
+      shell: bash
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+        echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+        . "$HOME/.cargo/env"
+        cd native
+        rustup show active-toolchain
+        rustup component add clippy rustfmt
+
     - uses: astral-sh/setup-uv@v6
 
     - name: Install Python ${{ inputs.python }} and chplfmt
       shell: bash
+      env:
+        CARGO_BUILD_JOBS: "4"
       run: |
         uv python install "${{ inputs.python }}"
         uv venv --python "${{ inputs.python }}" .venv
