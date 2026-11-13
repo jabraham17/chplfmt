@@ -339,10 +339,13 @@ def parse_text(text: str, path: str) -> Generator[ParseResult]:
     )
     name = parse_name(path)
     if native is not None:
-        native_path = path if name == os.path.basename(path) else name
+        native_name = (path if name == os.path.basename(path) else name).removesuffix(
+            ".chpl"
+        )
         with ctx.track_errors() as errs:
-            asts = native(native_path, text)
-        yield ParseResult(ctx, asts, map_diagnostics(_errors(errs), path, native_path))
+            asts = native(text, native_name)
+        parsed_path = ctx.introspect_parsed_files()[0]
+        yield ParseResult(ctx, asts, map_diagnostics(_errors(errs), path, parsed_path))
         return
     with tempfile.TemporaryDirectory(prefix="chplfmt-") as d:
         tmp = os.path.join(d, name)

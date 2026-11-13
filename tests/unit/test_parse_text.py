@@ -22,15 +22,16 @@ def shape(asts: list[Any]) -> list[tuple[str, tuple[int, int], tuple[int, int]]]
 
 
 class NativeContext:
-    """A Context with the future `parse_text(path, text)` API, emulated with a file
+    """A Context with the `parse_text(text, path)` API, emulated with a file
     written at the logical path itself."""
 
     def __init__(self) -> None:
         self._ctx = REAL_CONTEXT()
         self.calls: list[tuple[str, str]] = []
 
-    def parse_text(self, path: str, text: str) -> list[Any]:
-        self.calls.append((path, text))
+    def parse_text(self, text: str, name: str) -> list[Any]:
+        self.calls.append((text, name))
+        path = f"{name}.chpl"
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         return self._ctx.parse(path)
@@ -97,11 +98,12 @@ def test_text_is_written_unchanged() -> None:
     assert starts == [(1, 2), (2, 1), (2, 15)]
 
 
-def test_temp_file_lives_until_block_ends() -> None:
+def test_source_text_lives_until_block_ends() -> None:
     with parse_text("var x = 1;\n", "keep.chpl") as res:
         [tmp] = res.ctx.introspect_parsed_files()
         assert os.path.basename(tmp) == "keep.chpl"
-        assert os.path.exists(tmp)
+        if not hasattr(res.ctx, "parse_text"):
+            assert os.path.exists(tmp)
         assert res.ctx.get_file_text(tmp) == "var x = 1;\n"
     assert not os.path.exists(tmp)
 
@@ -179,7 +181,7 @@ def test_native_parse_text_gets_safe_name(tmp_path: Path) -> None:
         mp.setattr(_chapel.chapel, "Context", factory)
         with parse_text(BAD, "<stdin>") as res:
             paths = {d.path for d in res.diagnostics}
-    assert [c.calls for c in made] == [[("stdin.chpl", BAD)]]
+    assert [c.calls for c in made] == [[(BAD, "stdin")]]
     assert paths == {"<stdin>"}
 
 
@@ -197,7 +199,7 @@ def test_native_parse_text_matches_temp_file(tmp_path: Path, text: str) -> None:
         with parse_text(text, logical) as res:
             native_diags = res.diagnostics
             native_shape = shape(res.asts)
-    assert [c.calls for c in made] == [[(logical, text)]]
+    assert [c.calls for c in made] == [[(text, logical.removesuffix(".chpl"))]]
 
     os.remove(logical)
     with parse_text(text, logical) as res:
