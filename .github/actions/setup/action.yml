@@ -37,6 +37,7 @@ runs:
         curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
         echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
         . "$HOME/.cargo/env"
+        rustup default 1.85.1
         cd native
         rustup show active-toolchain
         rustup component add clippy rustfmt
