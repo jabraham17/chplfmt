@@ -7,6 +7,10 @@ structure and its own lexer for comments and spacing. Every result is
 re-parsed and checked against the input before anything is written; if that
 check fails, the file is left unchanged.
 
+## AI Generated
+
+This project was developed with heavy AI assistance and most of the code is unvalidated by a human. Use with care and review changes before applying them, especially when rewriting multiple files.
+
 ## Requirements
 
 - Chapel 2.10 or newer, with the Chapel Python bindings (chapel-py). They are
