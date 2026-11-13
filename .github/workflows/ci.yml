@@ -60,6 +60,20 @@ jobs:
       - run: python native/tools/gen_width_table.py --check
       - run: cargo fmt --manifest-path native/Cargo.toml --all --check
       - run: cargo clippy --manifest-path native/Cargo.toml --workspace --all-targets -- -D warnings
+
+  native-tests:
+    name: Native Rust tests
+    needs: images
+    runs-on: ubuntu-latest
+    container:
+      image: chapel/chapel:latest
+      options: --user root
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup
+        with:
+          python: "3.12"
+          image-digest: ${{ fromJSON(needs.images.outputs.digests).latest }}
       - run: cargo test --manifest-path native/Cargo.toml --workspace --all-targets
 
   native-smoke:
