@@ -62,6 +62,9 @@ class DebugOptions:
     skip_verify: bool = False
 
 
+_DEFAULT_DEBUG_OPTIONS = DebugOptions()
+
+
 def compute_edits(old: str, new: str) -> list[TextEdit]:
     """Minimal line-level edits that turn `old` into `new`."""
     a = old.splitlines(keepends=True)
@@ -177,7 +180,7 @@ def format_text(
     path: str | None = None,
     options: FormatOptions = FormatOptions(),  # noqa: B008 (frozen)
     lines: tuple[int, int] | None = None,
-    debug: DebugOptions = DebugOptions(),  # noqa: B008 (frozen)
+    debug: DebugOptions = _DEFAULT_DEBUG_OPTIONS,
 ) -> FormatResult:
     """Format `text`; `lines` is an inclusive 1-based line range."""
     logical = path or STDIN_PATH
