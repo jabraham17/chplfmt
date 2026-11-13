@@ -1,4 +1,4 @@
-"""remove-empty-statements (design section 7.8). Decision point: `statement_list`."""
+"""remove-empty-statements. Decision point: `statement_list`."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Golden tests (design section 10): `tests/golden/<area>/<case>.chpl` -> `<case>.good`.
+"""Golden tests: `tests/golden/<area>/<case>.chpl` -> `<case>.good`.
 
 Options come from `<case>.cfg` if present, else `chplfmt.cfg` in the area
 directory, passed as an explicit `-c`. `pytest --update-goldens` rewrites

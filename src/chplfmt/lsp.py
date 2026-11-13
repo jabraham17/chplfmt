@@ -1,4 +1,4 @@
-"""LSP server for document and range formatting (section 7.14)."""
+"""LSP server for document and range formatting."""
 
 from __future__ import annotations
 

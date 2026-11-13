@@ -1,4 +1,4 @@
-"""No output line exceeds `line-length` except unbreakable content (design section 10).
+"""No output line exceeds `line-length` except unbreakable content.
 
 A line longer than the limit is allowed only for one of these reasons
 (checked in order, on the default-options output):

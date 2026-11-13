@@ -1,4 +1,4 @@
-"""Command-line interface (section 7.12)."""
+"""Command-line interface."""
 
 from __future__ import annotations
 

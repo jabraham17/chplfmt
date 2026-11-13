@@ -1,4 +1,4 @@
-"""single-statement-body (design section 7.8). Decision point: printer/body.py."""
+"""single-statement-body. Decision point: printer/body.py."""
 
 from __future__ import annotations
 

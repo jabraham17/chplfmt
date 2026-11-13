@@ -1,4 +1,4 @@
-"""Corpus discovery for property tests (design section 10)."""
+"""Corpus discovery for property tests."""
 
 from __future__ import annotations
 

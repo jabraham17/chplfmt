@@ -1,4 +1,4 @@
-"""Printer (design section 7.7). Importing this package registers every construct printer."""
+"""Printer. Importing this package registers every construct printer."""
 
 from chplfmt.printer import aggregates as aggregates
 from chplfmt.printer import attrs as attrs

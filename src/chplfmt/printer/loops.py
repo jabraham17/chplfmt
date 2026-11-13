@@ -1,4 +1,4 @@
-"""Printers for For, Forall, Foreach, Coforall, BracketLoop, While, DoWhile, Zip (section 7.7).
+"""Printers for For, Forall, Foreach, Coforall, BracketLoop, While, DoWhile, Zip.
 
 WithClause is printed by `stmts`.
 """
@@ -44,7 +44,7 @@ def keyword_header(
     p: Printer, node: Node, first: int, last: int, kid: Node | None
 ) -> tuple[Doc, bool]:
     """Tokens `first..last` of `node`; `kid` (a condition or iterand) lines up
-    with its own first character when it wraps (section 7.7)."""
+    with its own first character when it wraps."""
     if (
         kid is None
         or p.index.node_span(kid) is None
@@ -69,7 +69,7 @@ def keyword_header(
 def loop_header(
     p: Printer, node: Node, first: int, last: int, end_width: int
 ) -> tuple[Doc, bool]:
-    """`for i in D`, `forall i in D with (...)`: `with` placement per section 8.7.
+    """Lay out loop headers such as `for i in D` and `forall i in D with (...)`.
 
     `end_width` is the width of what follows the header (` {`, ` do`).
     """

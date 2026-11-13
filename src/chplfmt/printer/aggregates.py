@@ -1,4 +1,4 @@
-"""Printers for Module, Class, Record, Union, Interface, Enum, EnumElement (section 8.8)."""
+"""Printers for Module, Class, Record, Union, Interface, Enum, EnumElement."""
 
 from __future__ import annotations
 

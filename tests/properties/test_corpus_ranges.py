@@ -1,4 +1,4 @@
-"""Range consistency (design section 10, property 4).
+"""Range consistency.
 
 (a) On canonically formatted text whose spacing was perturbed inside the
 range, formatting the range restores the whole-file output.

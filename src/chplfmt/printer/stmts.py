@@ -1,4 +1,4 @@
-"""Printers for Block, Return, Yield, Break, Continue, Throw, Delete, EmptyStmt, Label, Defer, Begin, Cobegin, Sync, Serial, Local, On, Manage, Try, Catch, Select, When, Use, Import, VisibilityClause, As, Include, Require, Implements, ExternBlock, Init (section 7.7).
+"""Printers for Block, Return, Yield, Break, Continue, Throw, Delete, EmptyStmt, Label, Defer, Begin, Cobegin, Sync, Serial, Local, On, Manage, Try, Catch, Select, When, Use, Import, VisibilityClause, As, Include, Require, Implements, ExternBlock, Init.
 
 Register with `@printer(chapel.Kind)` from `chplfmt.printer.core`.
 """
@@ -47,7 +47,7 @@ from chplfmt.tokens import Node
 
 @printer(chapel.Block)
 def print_block(p: Printer, node: Node) -> Doc:
-    """`{ ... }`; brace-less blocks fall back (M5e).
+    """`{ ... }`; brace-less blocks fall back.
 
     dyno merges `{ { ... } }` in a function body into one Block owning both pairs.
     """
@@ -65,7 +65,7 @@ def print_block(p: Printer, node: Node) -> Doc:
     return d
 
 
-# Simple statements (sections 8.9, 8.12)
+# Simple statements
 
 
 def _bounds(p: Printer, node: Node) -> tuple[int, int, bool] | None:
@@ -206,7 +206,7 @@ def print_empty_stmt(p: Printer, node: Node) -> Doc:
     return text(";")
 
 
-# Statements with bodies (sections 7.8, 8.2, 8.3, 8.9)
+# Statements with bodies
 
 
 def _before(p: Printer, i: int) -> int:
@@ -430,7 +430,7 @@ def with_clause(p: Printer, node: Node) -> tuple[Doc, int | None] | None:
 
 @printer(chapel.WithClause)
 def print_with_clause(p: Printer, node: Node) -> Doc | None:
-    """`with (ref x, + reduce y)`: never the break-after-`(` fallback (section 8.7)."""
+    """`with (ref x, + reduce y)`: never the break-after-`(` fallback."""
     wc = with_clause(p, node)
     return None if wc is None else wc[0]
 

@@ -1,4 +1,4 @@
-"""Every concrete AstNode subclass has a printer (design sections 7.7, 10)."""
+"""Every concrete AstNode subclass has a printer."""
 
 from __future__ import annotations
 

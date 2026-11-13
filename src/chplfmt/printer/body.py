@@ -1,4 +1,4 @@
-"""Bodies of constructs and the single-statement-body rule (sections 7.8, 8.3)."""
+"""Bodies of constructs and the single-statement-body rule."""
 
 from __future__ import annotations
 
@@ -381,7 +381,7 @@ class Body:
             return concat(h, indent(concat(hardline, d), n), trail)
         if hid is None:
             return concat(h, " ", d, trail)
-        # A header that breaks puts the body on its own line (section 8.3).
+        # A header that breaks puts the body on its own line.
         brk = if_break(hardline, line, hid)
         return concat(h, group(indent(concat(brk, d), n)), trail)
 

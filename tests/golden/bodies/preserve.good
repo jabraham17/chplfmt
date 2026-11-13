@@ -1,4 +1,4 @@
-// Section 8.3 examples
+// Single-statement bodies
 proc double(x: int) do return 2 * x;
 
 proc f() {

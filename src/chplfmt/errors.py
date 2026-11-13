@@ -1,4 +1,4 @@
-"""Exceptions of the library API (section 7.11), shared by `api` and `verify`."""
+"""Exceptions of the library API, shared by `api` and `verify`."""
 
 from __future__ import annotations
 

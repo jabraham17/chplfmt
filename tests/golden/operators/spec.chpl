@@ -1,8 +1,8 @@
-// Section 8.5
+// Operator line breaks
 const total = firstValue * scaleFactor + secondValue * otherScale +
               thirdValue * lastScale;
 
-// Section 8.9
+// Conditional expressions
 const y = if cond then a else b;
 const z = if someLongConditionExpression(withArguments)
              then firstAlternative

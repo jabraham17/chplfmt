@@ -1,4 +1,4 @@
-"""Locate and load chapel-py (section 7.1) and parse Chapel text through one shim."""
+"""Locate and load chapel-py and parse Chapel text through one shim."""
 
 from __future__ import annotations
 

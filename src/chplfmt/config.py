@@ -1,4 +1,4 @@
-"""Option registry and configargparse-based configuration (section 7.13)."""
+"""Option registry and configargparse-based configuration."""
 
 from __future__ import annotations
 

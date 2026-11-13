@@ -1,4 +1,4 @@
-"""Printer core (design section 7.7): dispatch, `print`, fallback, statement lists.
+"""Printer core: dispatch, `print`, fallback, statement lists.
 
 Construct printers live in the sibling modules and register themselves with
 `@printer(chapel.Kind, ...)`. A printer is `fn(p: Printer, node) -> Doc`; it
@@ -54,7 +54,7 @@ REGISTRY: dict[type, PrintFn] = {}
 
 
 def aligns_in_parens(node: Node) -> bool:
-    """Whether `node` aligns its continuation lines (operator chains, `if`; section 7.7)."""
+    """Whether `node` aligns its continuation lines (operator chains, `if`)."""
     return isinstance(node, chapel.OpCall | chapel.Conditional)
 
 
@@ -71,7 +71,7 @@ def printer(*classes: type) -> Callable[[PrintFn], PrintFn]:
 
 @dataclass(frozen=True)
 class RuleApplication:
-    """A rule changed the source form at 1-based `input_line` (section 7.8)."""
+    """A rule changed the source form at 1-based `input_line`."""
 
     rule: str
     input_line: int
@@ -146,7 +146,7 @@ class Printer:
         self._dispatch: dict[type, PrintFn | None] = {}
         # Token indices of user parentheses dropped by remove-redundant-parens.
         self.removed_parens: set[int] = set()
-        # Range formatting (section 7.10): the deepest list containing the range.
+        # Range formatting: the deepest list containing the range.
         self.range_lines = range_lines
         self.selection: ranges.Selection | None = None
         self.list_depth = 0
@@ -186,7 +186,7 @@ class Printer:
         leading: bool = True,
         trailing: bool = True,
     ) -> Doc:
-        """Print `node` (section 7.7); `col` is its output start column if known.
+        """Print `node`; `col` is its output start column if known.
 
         Leading and trailing comments are included unless the caller prints
         them itself (`leading=False` + `leading_comments(node)`, e.g. comments
@@ -223,7 +223,7 @@ class Printer:
         """Whether one layer of user parentheses stays (remove-redundant-parens)."""
         return redundant_parens.keep(self, node, layer, depth)
 
-    # Comments (section 7.5). Each helper marks what it returns as emitted.
+    # Each comment helper marks what it returns as emitted.
 
     def comment_doc(self, i: int) -> Doc:
         """Comment token `i`; a multi-line block comment re-indents by its column."""

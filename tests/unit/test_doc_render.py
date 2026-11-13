@@ -66,7 +66,7 @@ def test_flat_width() -> None:
     assert flat_width(concat("a", hardline, "b"), opts) is None
 
 
-# Builders shaped like the printer's (design section 7.7).
+# Builders shaped like the printer's.
 
 
 def bracket_list(
@@ -437,10 +437,10 @@ def test_conditional_group_memoized() -> None:
     assert max(len(s) for s in result.text.split("\n")) <= 80
 
 
-# Layouts from design section 8
+# Printer layouts
 
 
-def test_section_8_4_lists() -> None:
+def test_bracket_list_layouts() -> None:
     doc = concat(
         "var ",
         assign("x", bracket_list("foo(", ["alpha", "beta", "gamma"], ")")),
@@ -504,7 +504,7 @@ def test_section_8_4_lists() -> None:
     )
 
 
-def test_section_8_5_operators() -> None:
+def test_operator_layouts() -> None:
     total = concat(
         "const total = ",
         align(
@@ -562,7 +562,7 @@ def test_section_8_5_operators() -> None:
     )
 
 
-def test_section_8_6_formals_with_return_type() -> None:
+def test_formals_with_return_type() -> None:
     formals = bracket_list(
         "proc scale(",
         ["ref A: [?D] real", "alpha: real", "beta: real", "gamma: real", "delta: real"],
@@ -584,7 +584,7 @@ def test_section_8_6_formals_with_return_type() -> None:
     )
 
 
-def test_section_8_9_if_expression() -> None:
+def test_if_expression_layout() -> None:
     cond = bracket_list("someLongConditionExpression(", ["withArguments"], ")")
     doc = concat(
         "const y = ",

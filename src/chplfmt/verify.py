@@ -1,4 +1,4 @@
-"""Verifier (section 7.9): the output must mean exactly what the input meant.
+"""Verifier: the output must mean exactly what the input meant.
 
 Checks, in order: `reparse`, `ast`, `tokens`, `comments`, `verbatim`. Each
 rule (`chplfmt.rules`) describes what it may change; the verifier applies the

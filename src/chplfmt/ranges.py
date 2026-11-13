@@ -1,4 +1,4 @@
-"""Range formatting (design section 7.10).
+"""Range formatting.
 
 The printer builds the whole file's Doc as usual; every statement list checks
 whether it is the deepest one containing the range and, if so, builds the run

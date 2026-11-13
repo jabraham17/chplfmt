@@ -1,4 +1,4 @@
-"""remove-redundant-parens (design section 7.8). Decision point: `wrap_user_parens`."""
+"""remove-redundant-parens. Decision point: `wrap_user_parens`."""
 
 from __future__ import annotations
 

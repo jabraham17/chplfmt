@@ -1,4 +1,4 @@
-"""Option matrix (design section 10): `tests/options/<option>/<value>/*.chpl` -> `.good`.
+"""Option matrix: `tests/options/<option>/<value>/*.chpl` -> `.good`.
 
 The matrix is generated from the `FormatOptions` registry. Each case is
 formatted with that single option changed from the default. Every bool and

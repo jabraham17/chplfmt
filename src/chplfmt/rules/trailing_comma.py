@@ -1,4 +1,4 @@
-"""trailing-comma (design section 7.8).
+"""trailing-comma.
 
 Decision points: `bracket_list` (printer/lists.py) and enum layout
 (printer/aggregates.py).

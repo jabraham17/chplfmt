@@ -1,4 +1,4 @@
-"""Whitespace insensitivity (design section 10, property 5).
+"""Whitespace insensitivity.
 
 Randomly (seeded per file) changing spaces between tokens inside lines, away
 from comments, strings, and newlines, doesn't change the output.

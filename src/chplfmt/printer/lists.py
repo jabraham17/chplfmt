@@ -1,4 +1,4 @@
-"""Shared list layouts: `bracket_list` (section 7.7), bin-packed lists, assignments."""
+"""Shared list layouts: `bracket_list`, bin-packed lists, assignments."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from chplfmt.trivia import Placement
 
 
 class ListKind(enum.Enum):
-    """Whether a trailing comma is legal in a list (section 6)."""
+    """Whether a trailing comma is legal in a list."""
 
     FIXED = "fixed"  # illegal: calls, formals, `with`, `zip`, `use`, ...
     TRAILING = "trailing"  # legal, optional: array/domain literals, enums
@@ -220,7 +220,7 @@ def bracket_list(
     *,
     spacing: bool = False,
 ) -> Doc:
-    """A bracketed list (section 8.4): flat, aligned bin-pack, or the fallback.
+    """A bracketed list: flat, aligned bin-pack, or the fallback.
 
     `open_tok` is the open bracket token (owned by `owner`, whose dangling
     comments inside the brackets are printed); `items` are nodes or prepared
@@ -239,7 +239,7 @@ def aligned_expr(p: Printer, node: Node) -> Doc:
 
 
 def assignment(p: Printer, lhs: Doc, op: str, rhs: Node) -> Doc:
-    """`lhs op rhs` (section 7.7): break inside `rhs` first, after `op` last."""
+    """`lhs op rhs`: break inside `rhs` first, after `op` last."""
     cont = p.options.continuation_indent
     lead = p.trivia.leading(rhs)
     if lead and (lead[0].is_line or lead[0].placement is Placement.OWN_LINE):

@@ -1,4 +1,4 @@
-"""Stable library interface (section 7.11). Not thread-safe."""
+"""Stable library interface. Not thread-safe."""
 
 from __future__ import annotations
 

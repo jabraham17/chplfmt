@@ -1,4 +1,4 @@
-"""Printers for Conditional (statement and expression level) (section 7.7).
+"""Printers for Conditional (statement and expression level).
 
 Register with `@printer(chapel.Kind)` from `chplfmt.printer.core`.
 """
@@ -63,7 +63,7 @@ def _between(p: Printer, node: Node, blk: Node, lo: int, hi: int) -> list[Commen
 
 
 def _statement_if(p: Printer, node: chapel.Conditional) -> Doc | None:
-    """`if c then S;`, `if c { } else { }`, `else if` chains (sections 7.8, 8.2, 8.3)."""
+    """`if c then S;`, `if c { } else { }`, `else if` chains."""
     first = header_start(p, node)
     then_blk = node.then_block()
     open_t = open_brace(p, then_blk)

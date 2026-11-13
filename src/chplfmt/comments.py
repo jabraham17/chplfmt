@@ -1,7 +1,7 @@
 """Comment text transformations shared by the printer and the verifier.
 
-Sections 7.5 (tabs in comments), 7.8 (`comment-spacing`), 8.11 (re-indent),
-and 8.13 (no trailing whitespace, LF line endings).
+Handles tabs, `comment-spacing`, re-indentation, trailing whitespace, and
+LF line endings.
 """
 
 from __future__ import annotations

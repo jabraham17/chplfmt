@@ -1,4 +1,4 @@
-"""Printers for AttributeGroup and Attribute (pragmas included) (section 7.7).
+"""Printers for AttributeGroup and Attribute (pragmas included).
 
 Register with `@printer(chapel.Kind)` from `chplfmt.printer.core`.
 """
@@ -17,7 +17,7 @@ from chplfmt.trivia import Placement
 
 @printer(chapel.AttributeGroup)
 def print_attribute_group(p: Printer, node: Node) -> Doc:
-    """Pragmas and attributes in source order, one per line (section 8.10)."""
+    """Pragmas and attributes in source order, one per line."""
     sp = p.index.node_span(node)
     assert sp is not None
     tokens = p.tokens

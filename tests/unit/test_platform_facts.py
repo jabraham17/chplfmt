@@ -1,4 +1,4 @@
-"""Version guard: pins the chapel-py facts of design section 6 that chplfmt relies on."""
+"""Version guard: pins the chapel-py facts that chplfmt relies on."""
 
 import os
 import re
@@ -220,7 +220,7 @@ def test_chapel_py_lives_in_chpldeps() -> None:
 
 
 def test_no_native_parse_text_yet() -> None:
-    # When this fails, the shim starts using the real API (section 7.1).
+    # When this fails, the shim starts using the real API.
     if parse_version(CHAPEL_VERSION) < (2, 11, 0):  # type: ignore[operator]
         assert not hasattr(chapel.Context(), "parse_text")
 

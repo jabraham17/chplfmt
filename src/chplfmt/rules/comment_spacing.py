@@ -1,4 +1,4 @@
-"""comment-spacing: `//x` -> `// x` (design section 7.8).
+"""comment-spacing: `//x` -> `// x`.
 
 The verifier's comment check recomputes the expected text with `apply`.
 """

@@ -1,4 +1,4 @@
-"""Chapel tokenizer (design section 7.3), following dyno's flex rules (`chpl.lex`)."""
+"""Chapel tokenizer following dyno's flex rules (`chpl.lex`)."""
 
 from __future__ import annotations
 

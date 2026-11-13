@@ -1,4 +1,4 @@
-"""Comment attachment (design section 7.5).
+"""Comment attachment.
 
 `attach(index, off)` assigns every comment outside verbatim regions to exactly
 one node, as a *leading*, *trailing*, or *dangling* comment:

@@ -1,4 +1,4 @@
-"""`chplfmt: off` regions and other verbatim spans (sections 7.5 and 8.13)."""
+"""`chplfmt: off` regions and other verbatim spans."""
 
 from __future__ import annotations
 

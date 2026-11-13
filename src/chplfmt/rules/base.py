@@ -1,4 +1,4 @@
-"""The `Rule` record shared by all rewrite rules (design section 7.8)."""
+"""The `Rule` record shared by all rewrite rules."""
 
 from __future__ import annotations
 

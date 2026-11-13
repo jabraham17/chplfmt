@@ -1,4 +1,4 @@
-"""Printers for declarations and functions (sections 8.6, 8.7)."""
+"""Printers for declarations and functions."""
 
 from __future__ import annotations
 
@@ -269,7 +269,7 @@ def _join(docs: Sequence[Doc], sep: Doc) -> Doc:
 
 
 def _header(p: Printer, sig: _Signature, clauses: list[Doc], end_width: int) -> Doc:
-    """Signature and `where`/`lifetime` clauses laid out per section 8.7.
+    """Lay out the signature and `where`/`lifetime` clauses.
 
     `end_width` is the width of what ends the last line (` {`, ` do`, `;`).
     """

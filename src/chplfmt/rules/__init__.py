@@ -1,4 +1,4 @@
-"""Rewrite rules (design section 7.8): printer decisions plus verifier normalizations."""
+"""Rewrite rules: printer decisions plus verifier normalizations."""
 
 from __future__ import annotations
 

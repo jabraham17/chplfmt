@@ -1,4 +1,4 @@
-"""Corpus properties per option profile (design section 10).
+"""Corpus properties per option profile.
 
 Profiles: each non-default option value on its own, plus "all rules off".
 Each profile must verify, be idempotent, and respect `line-length`. Files

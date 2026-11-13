@@ -28,7 +28,7 @@ def test_defaults(tmp_path: Path) -> None:
     assert load_all(str(tmp_path))[1] == RunOptions()
 
 
-def test_default_values_match_design() -> None:
+def test_default_values() -> None:
     o = FormatOptions()
     assert (o.line_length, o.indent_width, o.continuation_indent, o.tab_size) == (
         80,

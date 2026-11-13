@@ -1,4 +1,4 @@
-"""Printers for identifiers, literals, calls, and other non-operator expressions (section 7.7)."""
+"""Printers for identifiers, literals, calls, and other non-operator expressions."""
 
 from __future__ import annotations
 
