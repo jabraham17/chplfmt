@@ -157,6 +157,44 @@ def test_assignment_with_wrapped_call_comment_is_idempotent() -> None:
     assert fmt(once) == once
 
 
+@pytest.mark.parametrize("opening, closing", [("[", "]"), ("(", ")")])
+@pytest.mark.parametrize("line_length", [35, 80])
+@pytest.mark.parametrize("prefix", ["", "firstArgument, "])
+def test_outer_call_breaks_before_single_item_delimiters(
+    opening: str, closing: str, line_length: int, prefix: str
+) -> None:
+    receiver = "aVeryLongArrayReceiverName"
+    if line_length == 80:
+        receiver = receiver * 2 + "WithLongerNameExtra"
+    inner = f"{receiver}{opening}i{closing}"
+    first = "  firstArgument,\n" if prefix else ""
+    expected = f"consume(\n{first}  {inner}\n);\n"
+    assert fmt(f"consume({prefix}{inner});\n", line_length=line_length) == expected
+    assert fmt(expected, line_length=line_length) == expected
+
+
+@pytest.mark.parametrize("opening, closing", [("[", "]"), ("(", ")")])
+def test_single_item_delimiters_can_split_as_last_resort(
+    opening: str, closing: str
+) -> None:
+    receiver = "longReceiverlongReceiverWithName"
+    source = f"{receiver}{opening}i{closing};\n"
+    expected = f"{receiver}{opening}\n  i\n{closing};\n"
+    assert fmt(source, line_length=35) == expected
+    assert all(len(line) <= 35 for line in expected.splitlines())
+    assert fmt(expected, line_length=35) == expected
+
+
+@pytest.mark.parametrize("opening, closing", [("[", "]"), ("(", ")")])
+def test_single_item_delimiters_keep_required_comment_breaks(
+    opening: str, closing: str
+) -> None:
+    source = f"consume(values{opening}// index\nidx{closing});\n"
+    result = fmt(source, line_length=35)
+    assert "// index\n" in result
+    assert fmt(result, line_length=35) == result
+
+
 def test_zip_bin_packs_comprehension_iterands() -> None:
     source = (
         "const packed = [entry in zip(firstArray, secondArray, thirdArray, "

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from chplfmt._chapel import chapel
 from chplfmt.doc import (
@@ -124,17 +124,20 @@ def list_fill(p: Printer, items: Sequence[ListItem | Node]) -> Doc:
 
 @dataclass(frozen=True)
 class BracketList:
-    """The two layouts of a bracketed list; `aligned` is None if comments forbid it."""
+    """Compact and expanded layouts; `aligned` is None if comments forbid it."""
 
     aligned: Doc | None
     fallback: Doc
+    compact: tuple[Doc, ...] = ()
 
     def doc(self) -> Doc:
         if self.aligned is None:
             return group(self.fallback, should_break=True)
         if self.aligned is self.fallback:
             return self.aligned
-        return group(conditional_group([self.aligned, self.fallback], ALL_LINES))
+        return group(
+            conditional_group([*self.compact, self.aligned, self.fallback], ALL_LINES)
+        )
 
 
 def bracket_layouts(
@@ -214,7 +217,26 @@ def bracket_layouts(
     aligned = concat(
         open_text, sp, align(fill(list_parts(its, aligned_comma))), sp, close_text
     )
-    return BracketList(aligned, fallback)
+    flat_items: list[ListItem] = []
+    for item in its:
+        flat_body = flatten(item.body)
+        if flat_body is None:
+            return BracketList(aligned, fallback)
+        flat_items.append(replace(item, body=flat_body))
+    compact_aligned = concat(
+        open_text,
+        sp,
+        align(fill(list_parts(flat_items, aligned_comma))),
+        sp,
+        close_text,
+    )
+    compact_fallback = concat(
+        open_text,
+        indent(concat(first, fill(list_parts(flat_items, fallback_comma))), cont),
+        softline,
+        close_text,
+    )
+    return BracketList(aligned, fallback, (compact_aligned, compact_fallback))
 
 
 def bracket_list(
@@ -228,6 +250,7 @@ def bracket_list(
 ) -> Doc:
     """A bracketed list: flat, aligned bin-pack, or the fallback.
 
+    Wrap between intact items before breaking inside an item.
     `open_tok` is the open bracket token (owned by `owner`, whose dangling
     comments inside the brackets are printed); `items` are nodes or prepared
     `ListItem`s. The fallback breaks after the open bracket, indents by

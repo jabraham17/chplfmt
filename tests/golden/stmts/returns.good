@@ -30,7 +30,8 @@ iter it() {
 }
 proc t() throws do throw new Error();
 proc u() throws {
-  throw new IllegalArgumentError("a fairly long message that " +
-                                 "keeps going on");
+  throw new IllegalArgumentError(
+    "a fairly long message that " + "keeps going on"
+  );
 }
 proc lt(ref x: R) ref lifetime return x do return x;
