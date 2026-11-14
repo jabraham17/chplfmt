@@ -6,11 +6,14 @@ from typing import Literal
 
 from chplfmt._chapel import chapel
 from chplfmt.doc import (
+    ALL_LINES,
     EMPTY,
     Doc,
     GroupId,
     concat,
+    conditional_group,
     flat_width,
+    flatten,
     group,
     hardline,
     if_break,
@@ -380,6 +383,12 @@ class Body:
         if broke or (lead and lead[0].placement is Placement.OWN_LINE):
             return concat(h, indent(concat(hardline, d), n), trail)
         if hid is None:
+            flat_body = flatten(d)
+            if flat_body is not None:
+                return conditional_group(
+                    [concat(h, " ", flat_body, trail), concat(h, " ", d, trail)],
+                    ALL_LINES,
+                )
             return concat(h, " ", d, trail)
         # A header that breaks puts the body on its own line.
         brk = if_break(hardline, line, hid)

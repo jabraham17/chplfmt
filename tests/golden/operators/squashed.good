@@ -1,21 +1,23 @@
 // Operator line breaks
-const total = firstValue * scaleFactor + secondValue * otherScale +
-              thirdValue * lastScale;
+const total =
+  firstValue * scaleFactor + secondValue * otherScale + thirdValue * lastScale;
 
-const total2 = firstValue * scaleFactor + secondValue * otherScale +
-               thirdValue * lastScale;
+const total2 =
+  firstValue * scaleFactor + secondValue * otherScale + thirdValue * lastScale;
 
-const total3 = firstValue * scaleFactor + secondValue * otherScale +
-               thirdValue * lastScale;
+const total3 =
+  firstValue * scaleFactor + secondValue * otherScale + thirdValue * lastScale;
 
 // Conditional expressions
 const y = if cond then a else b;
-const z = if someLongConditionExpression(withArguments)
-             then firstAlternative
-             else secondAlternative;
-const z2 = if someLongConditionExpression(withArguments)
-              then firstAlternative
-              else secondAlternative;
+const z =
+  if someLongConditionExpression(withArguments)
+     then firstAlternative
+     else secondAlternative;
+const z2 =
+  if someLongConditionExpression(withArguments)
+     then firstAlternative
+     else secondAlternative;
 
 proc spacing() {
   var s = a + b;
@@ -44,28 +46,34 @@ proc unary(x: int?, ref y: owned C?) {
 }
 
 proc chains() {
-  const ok = isValid(idx) && idx < limit && !visited[idx] &&
-             idx != sentinelValue && someOtherCondition(idx);
+  const ok =
+    isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+    someOtherCondition(idx);
   var flag: bool;
-  flag = isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
-         someOtherCondition(idx);
-  flag &&= isValid(idx) && idx < limit && !visited[idx] &&
-           idx != sentinelValue && someOtherCondition(idx);
+  flag =
+    isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+    someOtherCondition(idx);
+  flag &&=
+    isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+    someOtherCondition(idx);
 }
 
 proc parens() {
-  const ok = !(scale == 0 || scale == 1 || scale == 2 || scale == 4 ||
-               scale == 8 || scale == 16 || scale == 32);
-  const mixed = (alphaValue + betaValue + gammaValue + deltaValue +
-                 epsilonValue) * scaleFactorValue;
-  const sum = alphaValue + betaValue + gammaValue + deltaValue + epsilonValue +
-              zetaValue;
+  const ok =
+    !(scale == 0 || scale == 1 || scale == 2 || scale == 4 || scale == 8 ||
+      scale == 16 || scale == 32);
+  const mixed =
+    (alphaValue + betaValue + gammaValue + deltaValue + epsilonValue) *
+    scaleFactorValue;
+  const sum =
+    alphaValue + betaValue + gammaValue + deltaValue + epsilonValue + zetaValue;
 }
 
 proc exprIf() {
-  const f = if someLongConditionExpression(withArguments)
-               then firstAlternative
-               else if anotherLongConditionExpression(withArguments)
-               then secondAlternative
-               else thirdAlternative;
+  const f =
+    if someLongConditionExpression(withArguments)
+       then firstAlternative
+       else if anotherLongConditionExpression(withArguments)
+       then secondAlternative
+       else thirdAlternative;
 }

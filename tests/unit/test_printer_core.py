@@ -131,6 +131,58 @@ def test_statements_go_on_their_own_lines() -> None:
     assert fmt("var a; var b;\n") == "var a;\nvar b;\n"
 
 
+@pytest.mark.parametrize(
+    "line_length, continuation_indent, expected",
+    [
+        (80, 2, "const result = combine(alpha, beta);\n"),
+        (0, 2, "const result = combine(alpha, beta);\n"),
+        (30, 2, "const result =\n  combine(alpha, beta);\n"),
+        (30, 4, "const result =\n    combine(alpha, beta);\n"),
+    ],
+)
+def test_assignment_breaks_after_equals(
+    line_length: int, continuation_indent: int, expected: str
+) -> None:
+    options = dict(line_length=line_length, continuation_indent=continuation_indent)
+    assert fmt("const result = combine(alpha, beta);\n", **options) == expected
+    assert fmt(expected, **options) == expected
+
+
+def test_assignment_with_wrapped_call_comment_is_idempotent() -> None:
+    source = (
+        "err = qio_channel_advance_past_byte(false, ch_internal, firstByte, "
+        "maxToRead, /* consume */ false);\n"
+    )
+    once = fmt(source)
+    assert fmt(once) == once
+
+
+def test_zip_bin_packs_comprehension_iterands() -> None:
+    source = (
+        "const packed = [entry in zip(firstArray, secondArray, thirdArray, "
+        "fourthArray, fifthArray)] entry;\n"
+    )
+    result = fmt(source, line_length=50)
+    assert result.startswith("const packed =\n  [entry in zip(")
+    assert "firstArray, secondArray," in result
+    assert ")] entry;\n" in result
+    assert all(len(line) <= 50 for line in result.splitlines())
+    assert fmt(result, line_length=50) == result
+
+
+@pytest.mark.parametrize("separator", [" ", "\n"])
+def test_assignment_with_wrapped_argument_comment_is_idempotent(separator: str) -> None:
+    source = (
+        "proc f() { while true { while true { "
+        "err = qio_channel_advance_past_byte(false, ch_internal, firstByte, maxToRead,"
+        f"{separator}/* consume */ false);"
+        " } } }\n"
+    )
+    result = fmt(source)
+    assert "      err =\n        qio_channel_advance_past_byte(" in result
+    assert fmt(result) == result
+
+
 def test_top_level_comments_kept_in_order() -> None:
     src = "// a\n\n\n/* b */ var x; // c\nvar yy; // d\n/* e\n */\n\n// f"
     assert fmt(src) == (

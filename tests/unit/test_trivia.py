@@ -287,7 +287,7 @@ def test_nested_statement_list_comments_and_blank_lines() -> None:
 def test_misplaced_directive_warns() -> None:
     src = "f(a,\n  // chplfmt: off\n  b);\n"
     result = api.format_text(src, path="t.chpl")
-    assert result.text == src
+    assert result.text == "f(\n  a,\n  // chplfmt: off\n  b\n);\n"
     (w,) = result.report.warnings
     assert (w.line, w.col) == (2, 3)
     assert "chplfmt directive ignored" in w.message

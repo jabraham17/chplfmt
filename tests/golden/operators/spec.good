@@ -1,12 +1,13 @@
 // Operator line breaks
-const total = firstValue * scaleFactor + secondValue * otherScale +
-              thirdValue * lastScale;
+const total =
+  firstValue * scaleFactor + secondValue * otherScale + thirdValue * lastScale;
 
 // Conditional expressions
 const y = if cond then a else b;
-const z = if someLongConditionExpression(withArguments)
-             then firstAlternative
-             else secondAlternative;
+const z =
+  if someLongConditionExpression(withArguments)
+     then firstAlternative
+     else secondAlternative;
 
 // Spacing for each operator kind
 proc spacing() {
@@ -58,29 +59,35 @@ proc prec() {
 
 // Comments inside chains
 proc comments() {
-  var total = first + // after first
-              second + third;
+  var total =
+    first + // after first
+    second + third;
   var other = first + /* inline */ second;
 }
 
 // Long chains with anchors
 proc chains() {
-  const ok = isValid(idx) && idx < limit && !visited[idx] &&
-             idx != sentinelValue && someOtherCondition(idx);
+  const ok =
+    isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+    someOtherCondition(idx);
   var flag: bool;
-  flag = isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
-         someOtherCondition(idx);
-  flag &&= isValid(idx) && idx < limit && !visited[idx] &&
-           idx != sentinelValue && someOtherCondition(idx);
+  flag =
+    isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+    someOtherCondition(idx);
+  flag &&=
+    isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
+    someOtherCondition(idx);
   return isValid(idx) && idx < limit && !visited[idx] && idx != sentinelValue &&
          someOtherCondition(idx);
 }
 
 proc parens() {
-  const ok = !(scale == 0 || scale == 1 || scale == 2 || scale == 4 ||
-               scale == 8 || scale == 16 || scale == 32);
-  const mixed = (alphaValue + betaValue + gammaValue + deltaValue +
-                 epsilonValue) * scaleFactorValue;
+  const ok =
+    !(scale == 0 || scale == 1 || scale == 2 || scale == 4 || scale == 8 ||
+      scale == 16 || scale == 32);
+  const mixed =
+    (alphaValue + betaValue + gammaValue + deltaValue + epsilonValue) *
+    scaleFactorValue;
   return alphaValue + betaValue + gammaValue + deltaValue + epsilonValue +
          zetaValue;
 }
@@ -88,11 +95,12 @@ proc parens() {
 // Expression-level if
 proc exprIf() {
   const e = if a then b else if c then d else e;
-  const f = if someLongConditionExpression(withArguments)
-               then firstAlternative
-               else if anotherLongConditionExpression(withArguments)
-               then secondAlternative
-               else thirdAlternative;
+  const f =
+    if someLongConditionExpression(withArguments)
+       then firstAlternative
+       else if anotherLongConditionExpression(withArguments)
+       then secondAlternative
+       else thirdAlternative;
   return if someLongConditionExpression(withArguments)
             then firstAlternative
             else secondAlternative;

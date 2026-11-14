@@ -6,6 +6,7 @@ import enum
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from chplfmt._chapel import chapel
 from chplfmt.doc import (
     ALL_LINES,
     EMPTY,
@@ -15,6 +16,7 @@ from chplfmt.doc import (
     concat,
     conditional_group,
     fill,
+    flat_width,
     flatten,
     group,
     hardline,
@@ -202,7 +204,11 @@ def bracket_layouts(
         softline,
         close_text,
     )
-    if its[0].eol_lead or its[0].breaks_before or its[-1].breaks_after or rest:
+    if (
+        any(flat_width(it.lead, opts) != 0 for it in its)
+        or its[-1].breaks_after
+        or rest
+    ):
         return BracketList(None, fallback)
     sp = " " if spacing else ""
     aligned = concat(
@@ -239,7 +245,7 @@ def aligned_expr(p: Printer, node: Node) -> Doc:
 
 
 def assignment(p: Printer, lhs: Doc, op: str, rhs: Node) -> Doc:
-    """`lhs op rhs`: break inside `rhs` first, after `op` last."""
+    """`lhs op rhs`: keep it flat or move `rhs` to a continuation line."""
     cont = p.options.continuation_indent
     lead = p.trivia.leading(rhs)
     if lead and (lead[0].is_line or lead[0].placement is Placement.OWN_LINE):
@@ -263,20 +269,14 @@ def assignment(p: Printer, lhs: Doc, op: str, rhs: Node) -> Doc:
         return concat(lhs, " ", op, indent(concat(hardline, r), cont))
     rhs_d = align(r) if aligns_in_parens(rhs) else r
     flat_lhs = flatten(lhs)
-    if flat_lhs is None:
-        return conditional_group(
-            [
-                concat(lhs, " ", op, " ", rhs_d),
-                concat(lhs, " ", op, indent(concat(hardline, r), cont)),
-            ],
-            FIRST_LINE,
-        )
-    # The lhs breaks only if it doesn't fit before `op` on one line.
-    return conditional_group(
+    flat_rhs = flatten(r)
+    head = lhs if flat_lhs is None else flat_lhs
+    inline_rhs = rhs_d if isinstance(rhs, chapel.Function) else flat_rhs
+    layouts = [] if inline_rhs is None else [concat(head, " ", op, " ", inline_rhs)]
+    layouts.extend(
         [
-            concat(flat_lhs, " ", op, " ", rhs_d),
-            concat(flat_lhs, " ", op, indent(concat(hardline, r), cont)),
+            concat(head, " ", op, indent(concat(hardline, r), cont)),
             concat(lhs, " ", op, " ", rhs_d),
-        ],
-        FIRST_LINE,
+        ]
     )
+    return conditional_group(layouts, FIRST_LINE)

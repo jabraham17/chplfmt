@@ -34,7 +34,9 @@ proc lineComments(a: int, // the first
                   b: int, // the second
                   c: int) { }
 
-proc blockComments(a: int, /* first */ /* second */ b: int) { }
+proc blockComments(
+  a: int, /* first */ /* second */ b: int
+) { }
 
 proc ownLineComment(
   // leading

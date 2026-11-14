@@ -93,8 +93,9 @@ for (i, j) in zip(A, B) do writeln(i, j);
 // Comments inside parentheses are kept.
 var g1 = /* c */ x;
 var g2 = x /* d */;
-var g3 = x + // e
-         y;
+var g3 =
+  x + // e
+  y;
 
 // chplfmt: off
 var h1 = ((x));
