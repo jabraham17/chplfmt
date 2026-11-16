@@ -341,9 +341,9 @@ pub fn lex<'s>(text: &'s str, opaque: &[(usize, usize)]) -> Result<Tokens<'s>, L
                 b']' => b'[',
                 _ => b'{',
             };
-            if !stack
+            if stack
                 .last()
-                .is_some_and(|open| bytes[toks[*open].start_byte as usize] == opening)
+                .is_none_or(|open| bytes[toks[*open].start_byte as usize] != opening)
             {
                 return Err(LexError {
                     offset_cp: token.start_cp as usize,
