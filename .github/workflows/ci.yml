@@ -56,7 +56,10 @@ jobs:
           image-digest: ${{ fromJSON(needs.images.outputs.digests).latest }}
       - run: ruff check .
       - run: black --check .
-      - run: pyright
+      - name: Type check with chapel-py stubs
+        run: |
+          python -c 'import chplfmt._chapel as c; import sysconfig; from pathlib import Path; Path(sysconfig.get_paths()["purelib"], "chplfmt-chapel.pth").write_text(str(Path(c.chapel.__file__).parent.parent) + "\n")'
+          pyright
       - run: python native/tools/gen_width_table.py --check
       - run: cargo fmt --manifest-path native/Cargo.toml --all --check
       - run: cargo clippy --manifest-path native/Cargo.toml --workspace --all-targets -- -D warnings
@@ -114,7 +117,7 @@ jobs:
       fail-fast: false
       matrix:
         chapel: ["2.10.0", latest, nightly]
-        python: ["3.12", "3"] # minimum supported and latest 3.x
+        python: ["3.12", "3"]
     container:
       image: chapel/chapel:${{ matrix.chapel }}
       options: --user root
