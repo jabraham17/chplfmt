@@ -160,10 +160,10 @@ jobs:
           ls -d "$CHPL_HOME/modules" "$CHPL_HOME/test" 2>/dev/null || true
       - name: Corpus properties
         run: >
-          python -m pytest -q -n 1 -m corpus tests/properties
+          python -m pytest -q -n 0 -m corpus tests/properties
           --ignore=tests/properties/test_corpus_coverage.py
       - name: Coverage gate (no printer fallbacks)
-        run: python -m pytest -q -n 1 tests/properties/test_corpus_coverage.py
+        run: python -m pytest -q -n 0 tests/properties/test_corpus_coverage.py
       - name: Performance smoke test
         if: matrix.shard == 1
         run: python -m pytest -q -s -m perf tests/unit
