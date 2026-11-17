@@ -10,13 +10,16 @@ from contextlib import ExitStack
 
 from chplfmt._chapel import chapel
 from chplfmt.doc import (
+    ALL_LINES,
     EMPTY,
     Doc,
     concat,
     conditional_group,
     flat_width,
+    group,
     hardline,
     indent,
+    line,
     text,
 )
 from chplfmt.printer.body import Body, Form
@@ -377,13 +380,31 @@ def print_try(p: Printer, node: Node) -> Doc | None:
     assert isinstance(node, chapel.Try)
     blk = _block_child(p, node)
     if blk is None:
+        if node.is_expression_level() and len(kids := _kids(p, node)) == 1:
+            first = header_start(p, node)
+            return group(
+                concat(
+                    p.tokens[first].text,
+                    indent(
+                        concat(line, p.print(kids[0])),
+                        p.options.continuation_indent,
+                    ),
+                )
+            )
         return print_simple(p, node)
     first = header_start(p, node)
     header = text(p.tokens[first].text)
     d = Body(p, node, first, block=blk, form="block").doc(header)
     prev: Node = blk
     for c in node.handlers():
-        d = concat(d, after_block(p, prev, c), p.print(c))
+        sep = after_block(p, prev, c)
+        handler = p.print(c)
+        if flat_width(sep, p.options) == 1:
+            d = conditional_group(
+                [concat(d, " ", handler), concat(d, hardline, handler)], ALL_LINES
+            )
+        else:
+            d = concat(d, sep, handler)
         prev = c
     return with_attributes(p, node, d)
 
@@ -402,7 +423,16 @@ def print_catch(p: Printer, node: Node) -> Doc | None:
     broke = False
     if hl > first:
         rest, broke = tokens_doc(p, node, first + 1, hl)
-        header = concat("catch ", rest)
+        header = conditional_group(
+            [
+                concat("catch ", rest),
+                concat(
+                    "catch",
+                    indent(concat(hardline, rest), p.options.continuation_indent),
+                ),
+            ],
+            ALL_LINES,
+        )
     d = Body(p, node, hl, block=blk, form="block").doc(header, broke)
     return with_attributes(p, node, d)
 

@@ -351,6 +351,13 @@ impl<'s, 'r, 'd> Printer<'s, 'r, 'd> {
                             self.shared.opts.tab_size as i64,
                         )
                         .map_err(width_error)?;
+                        if self.measure
+                            && index == 0
+                            && self.pos > self.shared.limit
+                            && !self.line_verbatim
+                        {
+                            return Ok(false);
+                        }
                         self.line_verbatim = true;
                     }
                 }
@@ -764,11 +771,11 @@ impl<'s, 'r, 'd> Printer<'s, 'r, 'd> {
                             self.shared.opts.tab_size as i64,
                         )
                         .map_err(width_error)?;
-                        if has_newline {
-                            return Ok(col);
-                        }
                         if col > self.shared.limit {
                             return Ok(-1);
+                        }
+                        if has_newline {
+                            return Ok(col);
                         }
                     }
                     Kind::ColumnText(make) => {
@@ -1114,6 +1121,34 @@ mod tests {
             output(&group(vec![text("中\t"), line(), text("x")]), 6).text,
             "中\t x"
         );
+    }
+
+    #[test]
+    fn multiline_verbatim_first_line_counts_toward_fit() {
+        let doc = group(vec![
+            text("f("),
+            line(),
+            Doc::verbatim("abcdefghijk\nsecond", false),
+            text(")"),
+        ]);
+        assert_eq!(output(&doc, 13).text, "f(\nabcdefghijk\nsecond)");
+        assert_eq!(output(&doc, 14).text, "f( abcdefghijk\nsecond)");
+        let alternatives = Doc::conditional_group(
+            vec![
+                concat(vec![
+                    text("f("),
+                    Doc::verbatim("abcdefghijk\nsecond", false),
+                ]),
+                concat(vec![
+                    text("f("),
+                    Doc::line(LineKind::Hard),
+                    Doc::verbatim("abcdefghijk\nsecond", false),
+                ]),
+            ],
+            Check::AllLines,
+        )
+        .unwrap();
+        assert_eq!(output(&alternatives, 12).text, "f(\nabcdefghijk\nsecond");
     }
 
     #[test]

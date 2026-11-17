@@ -10,7 +10,6 @@ from chplfmt._chapel import chapel
 from chplfmt.doc import (
     ALL_LINES,
     EMPTY,
-    FIRST_LINE,
     Doc,
     align,
     concat,
@@ -95,7 +94,7 @@ def list_item(p: Printer, node: Node, prefix: Doc = EMPTY) -> ListItem:
         eol_lead=bool(lead)
         and lead[0].is_line
         and lead[0].placement is Placement.END_OF_LINE,
-        breaks_after=any(c.is_line or c.placement is Placement.OWN_LINE for c in after),
+        breaks_after=any(c.placement is not Placement.INLINE for c in after),
         raw=prints_raw_lines(p, node, n_fallbacks),
     )
 
@@ -295,11 +294,16 @@ def assignment(p: Printer, lhs: Doc, op: str, rhs: Node) -> Doc:
     flat_rhs = flatten(r)
     head = lhs if flat_lhs is None else flat_lhs
     inline_rhs = rhs_d if isinstance(rhs, chapel.Function) else flat_rhs
-    layouts = [] if inline_rhs is None else [concat(head, " ", op, " ", inline_rhs)]
+    layouts = (
+        []
+        if inline_rhs is None or flat_lhs is None
+        else [concat(head, " ", op, " ", inline_rhs)]
+    )
     layouts.extend(
         [
             concat(head, " ", op, indent(concat(hardline, r), cont)),
             concat(lhs, " ", op, " ", rhs_d),
+            concat(lhs, " ", op, indent(concat(hardline, r), cont)),
         ]
     )
-    return conditional_group(layouts, FIRST_LINE)
+    return conditional_group(layouts, ALL_LINES)

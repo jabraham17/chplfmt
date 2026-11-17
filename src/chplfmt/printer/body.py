@@ -384,6 +384,18 @@ class Body:
             return concat(h, indent(concat(hardline, d), n), trail)
         if hid is None:
             flat_body = flatten(d)
+            if (
+                isinstance(self.owner, chapel.BracketLoop)
+                and self.owner.is_expression_level()
+            ):
+                inline = d if flat_body is None else flat_body
+                return conditional_group(
+                    [
+                        concat(h, " ", inline, trail),
+                        concat(h, indent(concat(hardline, d), n), trail),
+                    ],
+                    ALL_LINES,
+                )
             if flat_body is not None:
                 return conditional_group(
                     [concat(h, " ", flat_body, trail), concat(h, " ", d, trail)],

@@ -132,6 +132,106 @@ def test_statements_go_on_their_own_lines() -> None:
 
 
 @pytest.mark.parametrize(
+    "source",
+    [
+        "var a = [1, 2; 3, 4; ; 5, 6; 7, 8;];\n",
+        "var a = [1, 2; 3, 4; ; 5, 6; 7, 8; ; ; "
+        "9, 10; 11, 12; ; 13, 14; 15, 16;];\n",
+    ],
+)
+def test_multidimensional_array_rows_preserve_dimensions(source: str) -> None:
+    for opts in ({}, {"line_length": 20}, {"bracket_spacing": True}):
+        once = fmt(source, **opts)
+        assert fmt(once, **opts) == once
+        assert "1, 2; 3, 4;" in once
+        assert "5, 6; 7, 8;" in once
+
+
+def test_multidecl_end_of_line_block_comments_are_stable() -> None:
+    source = (
+        "const first = 1, /* long comment about first */\n"
+        "      second = 2, third = 3, /* long comment about third */\n"
+        "      fourth = 4, fifth = 5;\n"
+    )
+    once = fmt(source, line_length=55)
+    assert fmt(once, line_length=55) == once
+    assert "/* long comment about first */\n" in once
+    assert "/* long comment about third */\n" in once
+
+
+def test_multiline_typed_assignment_wraps_initializer() -> None:
+    source = (
+        "const gammaCoef: 4*(8*real) = "
+        "((1.0, 1.0, -1.0, -1.0, 1.0, 1.0, -1.0, -1.0), "
+        "(1.0, -1.0, 1.0, -1.0, 1.0, -1.0, 1.0, -1.0));\n"
+    )
+    once = fmt(source, line_length=60)
+    assert fmt(once, line_length=60) == once
+    assert max(map(len, once.splitlines())) <= 60
+
+
+def test_header_block_comment_stays_put_with_broken_brace() -> None:
+    source = "class C /* : B */ { var x: int; }\n"
+    once = fmt(source, brace_style="break")
+    assert "class C /* : B */\n{" in once
+    assert fmt(once, brace_style="break") == once
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "module M { record R { "
+        "var sendBufs: [locDom.NeighDom] [locDom.bufDom] eltType; } }\n",
+        "proc f() { return + reduce [loc in targetLocDom] "
+        "locDoms[loc].myInds.size; }\n",
+        "module M { proc f() { if true { if true { "
+        "var (hasElt, elt): (bool, eltType) = "
+        "targetSegment.stealElement(); } } } }\n",
+        "proc f() { return try! (parent._value:LocaleModel)._node_id; }\n",
+        "module M { proc f() { try { f(); } "
+        "catch (e: UnexpectedEofError) { return 1; } } }\n",
+        "module M { inline proc (borrowed RootClass?).hash(): uint "
+        "{ var x = 1; return x; } }\n",
+    ],
+)
+def test_nested_expressions_fit_narrow_lines(source: str) -> None:
+    once = fmt(source, line_length=40)
+    assert max(map(len, once.splitlines())) <= 40
+    assert fmt(once, line_length=40) == once
+
+
+def test_commented_named_arguments_fit_with_increased_indentation() -> None:
+    source = (
+        "module M { proc type BlockCyclic1dom.dsiPrivatize1d"
+        "(privDist, privatizeData) { return new BlockCyclic1dom("
+        "wholeR=privatizeData(0), storagePerCycle=privatizeData(2),\n"
+        " // could include these in privatizeData\n"
+        " blockSizePos=privDist.blockSizePos, "
+        "numLocalesPos=privDist.numLocalesPos, "
+        "cycleSizePos=privDist.cycleSizePos); } }\n"
+    )
+    for opts in ({"continuation_indent": 4}, {"indent_width": 4}):
+        once = fmt(source, **opts)
+        assert max(map(len, once.splitlines())) <= 80
+        assert "blockSizePos=privDist.blockSizePos,\n" in once
+        assert fmt(once, **opts) == once
+
+
+def test_multiline_string_can_move_after_call_bracket() -> None:
+    source = (
+        "module M { record R { proc f() { if true { "
+        'compilerError("lowerBound is not available on types that can'
+        "'t be \\\n"
+        '                      default-initialized, here: " + eltType:string);'
+        " } } } }\n"
+    )
+    once = fmt(source, indent_width=4)
+    assert max(map(len, once.splitlines())) <= 80
+    assert "compilerError(\n" in once
+    assert fmt(once, indent_width=4) == once
+
+
+@pytest.mark.parametrize(
     "line_length, continuation_indent, expected",
     [
         (80, 2, "const result = combine(alpha, beta);\n"),

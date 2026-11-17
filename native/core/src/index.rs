@@ -515,7 +515,7 @@ impl TokenIndex {
             return None;
         }
         if rule == BaseRule::Module && self.facts.extra[node].implicit_module {
-            return (self.tokens.len() > 1).then_some((0, self.tokens.len() as u32 - 2));
+            return (self.tokens.len() > 1).then(|| (0, self.tokens.len() as u32 - 2));
         }
         if rule == BaseRule::Formal
             && kid_spans.is_empty()

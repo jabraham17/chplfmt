@@ -19,7 +19,7 @@ module M /* before brace */ { // after brace
 
     /* second */
   }
-  record G { /* before brace */
+  record G /* before brace */ {
     var z: int;
   }
   class K: /* before parent */ P /* after parent */ { }

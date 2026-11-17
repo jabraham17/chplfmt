@@ -245,7 +245,11 @@ class _Attacher:
         tokens = self.tokens
         moved: dict[int, tuple[Node, Anchor]] = {}
         for i in attachable:
-            if i in moved or placement(index, i) is not Placement.END_OF_LINE:
+            if (
+                i in moved
+                or tokens[i].kind is not TokenKind.LINE_COMMENT
+                or placement(index, i) is not Placement.END_OF_LINE
+            ):
                 continue
             b = index.next_code(i)
             tok = tokens[b]

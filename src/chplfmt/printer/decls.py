@@ -215,7 +215,24 @@ class _Signature:
             return
         close = p.tokens[open_tok].match
         assert close is not None
-        self.pre, _ = tokens_doc(p, node, first, open_tok - 1)
+        receiver = node.this_formal() if isinstance(node, chapel.Function) else None
+        receiver_span = p.index.node_span(receiver) if receiver is not None else None
+        if (
+            receiver_span is not None
+            and first < receiver_span[0] < open_tok
+            and p.tokens[receiver_span[0]].text == "("
+        ):
+            prefix, _ = tokens_doc(p, node, first, receiver_span[0] - 1)
+            suffix, _ = tokens_doc(p, node, receiver_span[0], open_tok - 1)
+            self.pre = conditional_group(
+                [
+                    concat(prefix, " ", suffix),
+                    concat(prefix, hardline, suffix),
+                ],
+                ALL_LINES,
+            )
+        else:
+            self.pre, _ = tokens_doc(p, node, first, open_tok - 1)
         formals = _kids_in(p, node, open_tok + 1, close - 1)
         self.layouts = bracket_layouts(p, node, open_tok, formals, ListKind.FIXED)
         if close < last:

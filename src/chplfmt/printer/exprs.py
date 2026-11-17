@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 
 from chplfmt._chapel import chapel
 from chplfmt.doc import (
@@ -13,7 +14,9 @@ from chplfmt.doc import (
     fill,
     group,
     hardline,
+    indent,
     line,
+    softline,
     text,
     verbatim,
 )
@@ -109,6 +112,7 @@ def actual_items(p: Printer, call: Node, open_tok: int) -> list[ListItem]:
         if p.index.node_span(a) is None or outer_start(p, a) <= open_tok:
             continue
         prefix = EMPTY
+        named = False
         eq = p.index.prev_code(outer_start(p, a))
         if (
             eq is not None
@@ -119,7 +123,11 @@ def actual_items(p: Printer, call: Node, open_tok: int) -> list[ListItem]:
             and p.tokens[name].kind is TokenKind.IDENT
         ):
             prefix = text(p.tokens[name].text + "=")
-        items.append(list_item(p, a, prefix))
+            named = True
+        item = list_item(p, a, prefix)
+        if named and item.breaks_before:
+            item = replace(item, breaks_after=True)
+        items.append(item)
     return items
 
 
@@ -294,6 +302,16 @@ def print_op_call(p: Printer, node: Node) -> Doc | None:
         return None
     if op in ASSIGN_OPS:
         return assignment(p, p.print(kids[0]), op, kids[1])
+    if op == ":":
+        return group(
+            concat(
+                p.print(kids[0]),
+                ":",
+                indent(
+                    concat(softline, p.print(kids[1])), p.options.continuation_indent
+                ),
+            )
+        )
     if op in _TIGHT_OPS:
         return concat(p.print(kids[0]), op, p.print(kids[1]))
     parts: list[Doc] = []
@@ -306,7 +324,14 @@ def print_reduce(p: Printer, node: Node) -> Doc:
     assert isinstance(node, chapel.Reduce | chapel.Scan)
     kw = next(i for i in own_code(p, node) if p.tokens[i].text in ("reduce", "scan"))
     op, iterand = p.print(node.op()), p.print(node.iterand())
-    return concat(op, " ", p.tokens[kw].text, " ", iterand)
+    return group(
+        concat(
+            op,
+            " ",
+            p.tokens[kw].text,
+            indent(concat(line, iterand), p.options.continuation_indent),
+        )
+    )
 
 
 def _literal(p: Printer, node: Node, kind: ListKind) -> Doc:
@@ -346,12 +371,38 @@ def print_array(p: Printer, node: Node) -> Doc:
         assert sp is not None
         if k:
             parts.append(hardline if p.tokens[sp[0]].nl_before else line)
-        semi = p.index.next_code(sp[1])
-        parts.append(concat(p.print(row), ";" if p.tokens[semi].text == ";" else ""))
+        end = close
+        if k + 1 < len(rows):
+            next_sp = p.index.node_span(rows[k + 1])
+            assert next_sp is not None
+            end = next_sp[0]
+        parts.append(concat(p.print(row), _row_semicolons(p, sp[1], end)))
     pad = " " if p.options.bracket_spacing else ""
     return group(concat("[", pad, align(fill(parts)), pad, "]"))
 
 
 @printer(chapel.ArrayRow)
 def print_array_row(p: Printer, node: Node) -> Doc:
-    return fill(list_parts([list_item(p, k) for k in p.index.children(node)]))
+    children = p.index.children(node)
+    if children and isinstance(children[0], chapel.ArrayRow):
+        parts: list[Doc] = []
+        for k, child in enumerate(children):
+            sp = p.index.node_span(child)
+            assert sp is not None
+            if k:
+                parts.append(hardline if p.tokens[sp[0]].nl_before else line)
+            end = sp[1]
+            if k + 1 < len(children):
+                next_sp = p.index.node_span(children[k + 1])
+                assert next_sp is not None
+                end = next_sp[0]
+            parts.append(concat(p.print(child), _row_semicolons(p, sp[1], end)))
+        return fill(parts)
+    return fill(list_parts([list_item(p, k) for k in children]))
+
+
+def _row_semicolons(p: Printer, last: int, end: int) -> str:
+    """Dimension separators between a row and the next row or closing bracket."""
+    return " ".join(
+        p.tokens[i].text for i in range(last + 1, end) if p.tokens[i].text == ";"
+    )
