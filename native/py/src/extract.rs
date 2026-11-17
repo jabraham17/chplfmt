@@ -164,8 +164,12 @@ pub fn walk(
         facts.class.push(class);
         facts.parent.push(parent);
         facts.loc.push(positions);
-        facts.curly.push(curly);
-        facts.extra.push(extra);
+        if let Some(curly) = curly {
+            facts.curly.insert(id, curly);
+        }
+        if extra != Extra::default() {
+            facts.extra.insert(id, extra);
+        }
         let begin = facts.kids.len() as u32;
         facts.kids.resize(facts.kids.len() + kids.len(), NO_NODE);
         facts.kid_range.push((begin, facts.kids.len() as u32));
@@ -185,7 +189,7 @@ pub fn walk(
         let node = node.bind(py);
         if facts.class[id].brackets == BracketRule::FnCall {
             let called = node.call_method0("called_expression")?;
-            facts.extra[id].called = id_of
+            facts.extra.entry(id as NodeId).or_default().called = id_of
                 .get_item(called)?
                 .map(|value| value.extract())
                 .transpose()?;
@@ -193,7 +197,9 @@ pub fn walk(
         if facts.parent[id] != NO_NODE
             && facts.class[facts.parent[id] as usize].brackets == BracketRule::FnCall
         {
-            facts.extra[id].paren = optional_location(node, "paren_location")?;
+            if let Some(paren) = optional_location(node, "paren_location")? {
+                facts.extra.entry(id as NodeId).or_default().paren = Some(paren);
+            }
         }
     }
     opaque.sort_unstable();

@@ -82,6 +82,9 @@ for Python type checking.
 - Native documents canonicalize empty concatenations and share printable ASCII
   text nodes. Flattening reuses unchanged subtrees; zero-width callbacks and
   layout controls must not be discarded as empty text.
+- Index rows use packed value buffers and offset pairs. Optional AST locations
+  and extra metadata are sparse, and Python token wrappers share the core token
+  buffer rather than copying token records.
 
 ## Validation
 

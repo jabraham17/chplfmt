@@ -4,6 +4,7 @@ mod render;
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use chplfmt_core::index::{NodeId, TokenIndex as CoreIndex};
 use chplfmt_core::lexer::scan::{self, LexErrorKind};
@@ -126,15 +127,22 @@ impl PyTokenKind {
 
 #[pyclass(frozen, name = "Token")]
 struct PyToken {
-    value: CoreToken,
+    tokens: Arc<Vec<CoreToken>>,
+    index: usize,
     text: Py<PyString>,
+}
+
+impl PyToken {
+    fn value(&self) -> &CoreToken {
+        &self.tokens[self.index]
+    }
 }
 
 #[pymethods]
 impl PyToken {
     #[getter]
     fn kind(&self, py: Python<'_>) -> Py<PyTokenKind> {
-        kinds(py)[self.value.kind as usize].clone_ref(py)
+        kinds(py)[self.value().kind as usize].clone_ref(py)
     }
     #[getter]
     fn text(&self, py: Python<'_>) -> Py<PyString> {
@@ -142,36 +150,36 @@ impl PyToken {
     }
     #[getter]
     fn start_offset(&self) -> u32 {
-        self.value.start_cp
+        self.value().start_cp
     }
     #[getter]
     fn end_offset(&self) -> u32 {
-        self.value.end_cp
+        self.value().end_cp
     }
     #[getter]
     fn start(&self) -> (u32, u32) {
-        (self.value.start.line, self.value.start.col)
+        (self.value().start.line, self.value().start.col)
     }
     #[getter]
     fn end(&self) -> (u32, u32) {
-        (self.value.end.line, self.value.end.col)
+        (self.value().end.line, self.value().end.col)
     }
     #[getter]
     fn nl_before(&self) -> u32 {
-        self.value.nl_before
+        self.value().nl_before
     }
     #[getter]
     fn ws_before(&self) -> bool {
-        self.value.ws_before
+        self.value().ws_before
     }
     #[getter]
     fn r#match(&self) -> Option<u32> {
-        (self.value.partner != NO_MATCH).then_some(self.value.partner)
+        (self.value().partner != NO_MATCH).then_some(self.value().partner)
     }
     #[getter]
     fn is_comment(&self) -> bool {
         matches!(
-            self.value.kind,
+            self.value().kind,
             CoreKind::LineComment | CoreKind::BlockComment
         )
     }
@@ -182,7 +190,7 @@ impl PyToken {
         py: Python<'_>,
     ) -> PyResult<bool> {
         let equal = if let Ok(other) = other.extract::<PyRef<'_, PyToken>>() {
-            self.value == other.value
+            self.value() == other.value()
                 && self.text.bind(py).to_str()? == other.text.bind(py).to_str()?
         } else {
             false
@@ -195,22 +203,31 @@ impl PyToken {
     }
     fn __hash__(&self, py: Python<'_>) -> PyResult<u64> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        (self.value.kind as u8).hash(&mut hasher);
+        let value = self.value();
+        (value.kind as u8).hash(&mut hasher);
         self.text.bind(py).to_str()?.hash(&mut hasher);
-        self.value.start_cp.hash(&mut hasher);
-        self.value.end_cp.hash(&mut hasher);
-        self.value.start.hash(&mut hasher);
-        self.value.end.hash(&mut hasher);
-        self.value.nl_before.hash(&mut hasher);
-        self.value.ws_before.hash(&mut hasher);
-        self.value.partner.hash(&mut hasher);
+        value.start_cp.hash(&mut hasher);
+        value.end_cp.hash(&mut hasher);
+        value.start.hash(&mut hasher);
+        value.end.hash(&mut hasher);
+        value.nl_before.hash(&mut hasher);
+        value.ws_before.hash(&mut hasher);
+        value.partner.hash(&mut hasher);
         Ok(hasher.finish())
     }
 }
 
 #[pyfunction]
 fn lex(py: Python<'_>, text: &str, opaque: Vec<(usize, usize)>) -> PyResult<Vec<Py<PyToken>>> {
-    let tokens = scan::lex(text, &opaque)
+    wrap_tokens(py, text, lex_tokens(py, text, &opaque)?)
+}
+
+fn lex_tokens(
+    py: Python<'_>,
+    text: &str,
+    opaque: &[(usize, usize)],
+) -> PyResult<Arc<Vec<CoreToken>>> {
+    let tokens = scan::lex(text, opaque)
         .map_err(|error| {
             if error.reason == LexErrorKind::TooLarge {
                 return Ok(PyValueError::new_err("source is at least 4 GiB"));
@@ -232,13 +249,20 @@ fn lex(py: Python<'_>, text: &str, opaque: Vec<(usize, usize)>) -> PyResult<Vec<
             Ok::<PyErr, PyErr>(err)
         })
         .map_err(|result| result.unwrap())?;
+    Ok(Arc::new(tokens.toks))
+}
+
+fn wrap_tokens(
+    py: Python<'_>,
+    source: &str,
+    tokens: Arc<Vec<CoreToken>>,
+) -> PyResult<Vec<Py<PyToken>>> {
     let mut interned: HashMap<&str, Py<PyString>> = HashMap::new();
     tokens
-        .toks
         .iter()
         .enumerate()
         .map(|(index, token)| {
-            let value = tokens.text(index);
+            let value = &source[token.start_byte as usize..token.end_byte as usize];
             let text = if value.len() <= 16 {
                 interned
                     .entry(value)
@@ -250,7 +274,8 @@ fn lex(py: Python<'_>, text: &str, opaque: Vec<(usize, usize)>) -> PyResult<Vec<
             Py::new(
                 py,
                 PyToken {
-                    value: *token,
+                    tokens: tokens.clone(),
+                    index,
                     text,
                 },
             )
@@ -482,7 +507,7 @@ impl NativeIndex {
                     .and_then(|child| self.value.node_span(child)));
             }
         }
-        if let Some((start, end)) = self.value.facts.curly[id as usize] {
+        if let Some((start, end)) = self.value.facts.curly(id as usize) {
             return Ok(self.value.span(start, end));
         }
         if class.flags & 32 != 0 {
@@ -584,8 +609,8 @@ fn build_index(
 ) -> PyResult<NativeIndex> {
     let extracted = extract::walk(py, source, roots, classify, comment, extern_block)?;
     let text: String = source.getattr("text")?.extract()?;
-    let tokens = lex(py, &text, extracted.opaque)?;
-    let core_tokens = tokens.iter().map(|token| token.borrow(py).value).collect();
+    let core_tokens = lex_tokens(py, &text, &extracted.opaque)?;
+    let tokens = wrap_tokens(py, &text, core_tokens.clone())?;
     let token_list = PyList::new(py, &tokens)?.unbind();
     Ok(NativeIndex {
         value: CoreIndex::new(&text, core_tokens, extracted.facts),

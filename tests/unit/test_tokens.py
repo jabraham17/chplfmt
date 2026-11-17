@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from chplfmt._chapel import chapel, parse_text
-from chplfmt.lexer import LexError, TokenKind, check_invariants, tokenize
+from chplfmt.lexer import LexError, Token, TokenKind, check_invariants, tokenize
 from chplfmt.source import SourceText
 from chplfmt.tokens import Span, TokenIndex, string_value
 
@@ -357,6 +357,19 @@ def test_native_index_cycle_is_collected() -> None:
         index_ref = make_cycle()
         gc.collect()
         assert index_ref() is None
+
+
+def test_token_survives_its_index() -> None:
+    def token_from_index() -> Token:
+        with indexed("var value = 123;") as idx:
+            return idx.tokens[1]
+
+    token = token_from_index()
+    gc.collect()
+    assert token.text == "value"
+    assert token.start == (1, 5)
+    assert token.end == (1, 10)
+    assert token.kind is TokenKind.IDENT
 
 
 def test_native_index_build_preserves_lex_error() -> None:

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::lexer::token::{Pos, Token, TokenKind, NO_MATCH};
 
@@ -45,7 +46,7 @@ pub struct NodeClass {
     pub flags: u16,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Extra {
     pub implicit_module: bool,
     pub implicit_formal: bool,
@@ -67,27 +68,66 @@ pub struct AstFacts {
     pub kids: Vec<NodeId>,
     pub kid_range: Vec<(u32, u32)>,
     pub loc: Vec<(Pos, Pos)>,
-    pub curly: Vec<Option<(Pos, Pos)>>,
-    pub extra: Vec<Extra>,
+    pub curly: HashMap<NodeId, (Pos, Pos)>,
+    pub extra: HashMap<NodeId, Extra>,
+}
+
+impl AstFacts {
+    fn extra(&self, node: usize) -> Extra {
+        self.extra
+            .get(&(node as NodeId))
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn curly(&self, node: usize) -> Option<(Pos, Pos)> {
+        self.curly.get(&(node as NodeId)).copied()
+    }
+}
+
+struct Packed<T> {
+    ranges: Vec<(u32, u32)>,
+    values: Vec<T>,
+}
+
+impl<T> Packed<T> {
+    fn new(rows: usize) -> Self {
+        Self {
+            ranges: vec![(0, 0); rows],
+            values: Vec::new(),
+        }
+    }
+
+    fn set(&mut self, row: usize, values: impl IntoIterator<Item = T>) {
+        let start = self.values.len() as u32;
+        self.values.extend(values);
+        self.ranges[row] = (start, self.values.len() as u32);
+    }
+
+    fn get(&self, row: usize) -> &[T] {
+        let (start, end) = self.ranges[row];
+        &self.values[start as usize..end as usize]
+    }
 }
 
 pub struct TokenIndex {
-    pub tokens: Vec<Token>,
+    pub tokens: Arc<Vec<Token>>,
     pub facts: AstFacts,
     spans: Vec<Option<Span>>,
     from_curly: Vec<bool>,
     sig_ends: HashSet<Pos>,
-    src_kids: Vec<Vec<NodeId>>,
+    src_kids: Packed<NodeId>,
     owner: Vec<NodeId>,
-    own: Vec<Vec<u32>>,
-    structural: Vec<Vec<u32>>,
-    user_parens: Vec<Vec<(u32, u32, NodeId)>>,
-    parens_around: Vec<Vec<Span>>,
+    own: Packed<u32>,
+    structural: Packed<u32>,
+    user_parens: Packed<(u32, u32, NodeId)>,
+    parens_around: Packed<Span>,
     pub problems: Vec<(NodeId, NodeId)>,
 }
 
 impl TokenIndex {
-    pub fn new(text: &str, tokens: Vec<Token>, facts: AstFacts) -> Self {
+    pub fn new(text: &str, tokens: impl Into<Arc<Vec<Token>>>, facts: AstFacts) -> Self {
+        let tokens = tokens.into();
         let count = facts.class.len();
         let owner = vec![NO_NODE; tokens.len()];
         let mut index = Self {
@@ -96,12 +136,12 @@ impl TokenIndex {
             spans: vec![None; count],
             from_curly: vec![false; count],
             sig_ends: HashSet::new(),
-            src_kids: vec![Vec::new(); count],
+            src_kids: Packed::new(count),
             owner,
-            own: vec![Vec::new(); count],
-            structural: vec![Vec::new(); count],
-            user_parens: vec![Vec::new(); count],
-            parens_around: vec![Vec::new(); count],
+            own: Packed::new(count),
+            structural: Packed::new(count),
+            user_parens: Packed::new(count),
+            parens_around: Packed::new(count),
             problems: Vec::new(),
         };
         index.compute_spans(text);
@@ -198,7 +238,7 @@ impl TokenIndex {
         let parent = self.facts.parent[node as usize];
         parent != NO_NODE
             && self.facts.class[parent as usize].brackets == BracketRule::FnCall
-            && self.facts.extra[parent as usize].called == Some(node)
+            && self.facts.extra(parent as usize).called == Some(node)
             && self.facts.loc[node as usize] == self.facts.loc[parent as usize]
     }
 
@@ -207,34 +247,37 @@ impl TokenIndex {
     }
 
     pub fn own_tokens(&self, node: NodeId) -> &[u32] {
-        &self.own[node as usize]
+        self.own.get(node as usize)
     }
 
     pub fn children(&self, node: NodeId) -> &[NodeId] {
-        &self.src_kids[node as usize]
+        self.src_kids.get(node as usize)
     }
 
     pub fn structural_brackets(&self, node: NodeId) -> &[u32] {
-        &self.structural[node as usize]
+        self.structural.get(node as usize)
     }
 
     pub fn user_parens(&self, node: NodeId) -> &[(u32, u32, NodeId)] {
-        &self.user_parens[node as usize]
+        self.user_parens.get(node as usize)
     }
 
     pub fn parens_around(&self, node: NodeId) -> &[Span] {
-        &self.parens_around[node as usize]
+        self.parens_around.get(node as usize)
     }
 
     fn compute_brackets(&mut self, text: &str) {
         for node in 0..self.facts.class.len() {
-            self.structural[node] = self.find_structural_brackets(text, node as NodeId);
+            self.structural
+                .set(node, self.find_structural_brackets(text, node as NodeId));
         }
         for node in 0..self.facts.class.len() {
-            self.user_parens[node] = self.find_user_parens(text, node as NodeId);
+            self.user_parens
+                .set(node, self.find_user_parens(text, node as NodeId));
         }
+        let mut around: HashMap<NodeId, Vec<Span>> = HashMap::new();
         for node in 0..self.facts.class.len() {
-            for &(open, close, kid) in &self.user_parens[node] {
+            for &(open, close, kid) in self.user_parens.get(node) {
                 let mut parent = self.facts.parent[kid as usize];
                 while parent != NO_NODE
                     && self.facts.class[parent as usize].base == BaseRule::Block
@@ -243,12 +286,13 @@ impl TokenIndex {
                     parent = self.facts.parent[parent as usize];
                 }
                 if parent == node as NodeId {
-                    self.parens_around[kid as usize].push((open, close));
+                    around.entry(kid).or_default().push((open, close));
                 }
             }
         }
-        for layers in &mut self.parens_around {
+        for (kid, mut layers) in around {
             layers.sort_unstable_by(|a, b| b.cmp(a));
+            self.parens_around.set(kid as usize, layers);
         }
     }
 
@@ -267,7 +311,7 @@ impl TokenIndex {
 
     fn find_structural_brackets(&self, text: &str, node: NodeId) -> Vec<u32> {
         let class = self.facts.class[node as usize];
-        let extra = self.facts.extra[node as usize];
+        let extra = self.facts.extra(node as usize);
         let mut found = match class.brackets {
             BracketRule::FnCall => {
                 let called_end = extra
@@ -289,7 +333,9 @@ impl TokenIndex {
                             })
                             .collect();
                         if inside.len() == 1
-                            && self.facts.extra[inside[0] as usize]
+                            && self
+                                .facts
+                                .extra(inside[0] as usize)
                                 .paren
                                 .and_then(|(start, end)| self.span(start, end))
                                 == Some((open, close))
@@ -324,7 +370,7 @@ impl TokenIndex {
                     found.push(first);
                 }
             }
-        } else if let Some((start, end)) = self.facts.curly[node as usize] {
+        } else if let Some((start, end)) = self.facts.curly(node as usize) {
             if let Some((first, _)) = self.span(start, end) {
                 if self.owner(first) == node {
                     found.push(first);
@@ -429,7 +475,7 @@ impl TokenIndex {
                 }
             }
         }
-        if self.facts.extra[node as usize].expression_level {
+        if self.facts.extra(node as usize).expression_level {
             return found;
         }
         for &token in self.own_tokens(node) {
@@ -466,9 +512,9 @@ impl TokenIndex {
         }
         if rule == BaseRule::Block {
             let parent = self.facts.parent[node];
-            let curly = self.facts.curly[node].or_else(|| {
+            let curly = self.facts.curly(node).or_else(|| {
                 (parent != NO_NODE && self.facts.class[parent as usize].body_owner)
-                    .then(|| self.facts.curly[parent as usize])
+                    .then(|| self.facts.curly(parent as usize))
                     .flatten()
             });
             let span = if let Some((open, close)) = curly {
@@ -514,12 +560,12 @@ impl TokenIndex {
         if rule == BaseRule::ArrayRow {
             return None;
         }
-        if rule == BaseRule::Module && self.facts.extra[node].implicit_module {
+        if rule == BaseRule::Module && self.facts.extra(node).implicit_module {
             return (self.tokens.len() > 1).then(|| (0, self.tokens.len() as u32 - 2));
         }
         if rule == BaseRule::Formal
             && kid_spans.is_empty()
-            && self.facts.extra[node].implicit_formal
+            && self.facts.extra(node).implicit_formal
         {
             return None;
         }
@@ -582,7 +628,7 @@ impl TokenIndex {
                 .chain(base)
                 .reduce(|(a, b), (c, d)| (a.min(c), b.max(d)));
             own_kids.sort_by_key(|&kid| self.node_span(kid));
-            self.src_kids[node] = own_kids;
+            self.src_kids.set(node, own_kids);
         }
     }
 
@@ -593,7 +639,8 @@ impl TokenIndex {
             };
             let mut cursor = first;
             let mut previous: Option<NodeId> = None;
-            for &kid in &self.src_kids[node] {
+            let start = self.own.values.len() as u32;
+            for &kid in self.src_kids.get(node) {
                 let (begin, end) = self.spans[kid as usize].unwrap();
                 if let Some(prev) = previous {
                     if begin <= self.spans[prev as usize].unwrap().1 {
@@ -601,16 +648,17 @@ impl TokenIndex {
                     }
                 }
                 for token in cursor..begin {
-                    self.own[node].push(token);
+                    self.own.values.push(token);
                     self.owner[token as usize] = node as u32;
                 }
                 cursor = cursor.max(end + 1);
                 previous = Some(kid);
             }
             for token in cursor..=last {
-                self.own[node].push(token);
+                self.own.values.push(token);
                 self.owner[token as usize] = node as u32;
             }
+            self.own.ranges[node] = (start, self.own.values.len() as u32);
         }
     }
 }
@@ -653,16 +701,14 @@ mod tests {
                 (pos(5), pos(6)),
                 (pos(9), pos(10)),
             ],
-            curly: vec![None; 4],
-            extra: vec![
+            curly: HashMap::new(),
+            extra: HashMap::from([(
+                0,
                 Extra {
                     implicit_module: true,
                     ..Extra::default()
                 },
-                Extra::default(),
-                Extra::default(),
-                Extra::default(),
-            ],
+            )]),
         };
         let index = TokenIndex::new(text, tokens, facts);
         assert_eq!(index.find_start(pos(5)), Some(1));
