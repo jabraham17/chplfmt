@@ -25,7 +25,7 @@ from chplfmt.doc import (
     softline,
     text,
 )
-from chplfmt.printer.core import Printer, aligns_in_parens
+from chplfmt.printer.core import Printer, RuleApplication, aligns_in_parens
 from chplfmt.tokens import Node
 from chplfmt.trivia import Placement
 
@@ -191,9 +191,11 @@ def bracket_layouts(
         aligned_comma: Doc = text(",") if always or src_comma else EMPTY
         fallback_comma: Doc = aligned_comma
     else:
+        applications = p.report.applications
+        application = RuleApplication("trailing-comma", tokens[comma_tok].start[0])
 
         def rec() -> None:
-            p.record("trailing-comma", comma_tok)
+            applications.append(application)
 
         aligned_comma = on_render(rec) if src_comma else EMPTY
         fallback_comma = text(",") if src_comma else concat(",", on_render(rec))

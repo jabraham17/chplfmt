@@ -228,8 +228,21 @@ class Printer:
     def comment_doc(self, i: int) -> Doc:
         """Comment token `i`; a multi-line block comment re-indents by its column."""
         self.emitted.append(i)
-        if "\n" in self.tokens[i].text:
-            return column_text(lambda col: self.comment_text(i, col))
+        value = self.tokens[i].text
+        if "\n" in value:
+            opts = self.options
+            input_col = self.source.display_column(
+                self.tokens[i].start_offset, opts.tab_size
+            )
+            return column_text(
+                lambda col: expected_comment_text(
+                    value,
+                    input_col=input_col,
+                    output_col=col,
+                    tab_size=opts.tab_size,
+                    comment_spacing=opts.comment_spacing,
+                )
+            )
         return text(self.comment_text(i, 0))
 
     def _breaks(self, nl: int) -> list[Doc]:

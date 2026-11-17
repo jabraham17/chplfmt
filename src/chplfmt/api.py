@@ -226,16 +226,19 @@ def _print_range(
 ) -> tuple[str, PrintReport, tuple[int, int] | None]:
     """The text with only the statements intersecting `lines` formatted."""
     p = Printer(index, options, path=path, range_lines=lines)
-    p.print_file()
-    sel = p.selection
-    report = PrintReport(warnings=p.report.warnings)
-    if sel is None or sel.doc is None:
-        return index.source.text, report, None
-    lo, hi = sel.first_line, sel.last_line
-    report.applications += [
-        a for a in p.report.applications if lo <= a.input_line <= hi
-    ]
-    return ranges.splice(index.source, sel, p), report, (lo, hi)
+    try:
+        p.print_file()
+        sel = p.selection
+        report = PrintReport(warnings=p.report.warnings)
+        if sel is None or sel.doc is None:
+            return index.source.text, report, None
+        lo, hi = sel.first_line, sel.last_line
+        report.applications += [
+            a for a in p.report.applications if lo <= a.input_line <= hi
+        ]
+        return ranges.splice(index.source, sel, p), report, (lo, hi)
+    finally:
+        p.selection = None
 
 
 def _dump_failed(directory: str, path: str, text: str) -> None:

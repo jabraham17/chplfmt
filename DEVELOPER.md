@@ -76,6 +76,9 @@ for Python type checking.
   in [`native/core/src/doc/`](native/core/src/doc/).
 - Keep `// chplfmt: off` and extern regions byte-identical. Range formatting
   should not modify unselected text.
+- Document callbacks must not capture the printer or index. Range selections
+  retain documents until rendering finishes, so backreferences can retain an
+  entire input through a cycle that Python cannot traverse through native docs.
 
 ## Validation
 

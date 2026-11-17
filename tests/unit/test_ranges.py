@@ -1,3 +1,5 @@
+import gc
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -6,6 +8,7 @@ import pytest
 from chplfmt import api
 from chplfmt.cli import main
 from chplfmt.config import FormatOptions
+from chplfmt.printer import Printer
 
 SRC = """\
 proc f(x:int) {
@@ -140,6 +143,37 @@ def test_edits_minimal() -> None:
     r = api.format_text(SRC, lines=(2, 2))
     assert r.edits == [api.TextEdit(1, 2, "  var a = 1;\n")]
     assert r.changed
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["/* hello\n world */\nvar x=1;\n", "var x=[1,2,3];\n"],
+)
+@pytest.mark.parametrize("fail", [False, True])
+def test_range_releases_printer(
+    source: str, fail: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    refs: list[weakref.ReferenceType[Printer]] = []
+
+    def tracked(*args: Any, **kwargs: Any) -> Printer:
+        printer = Printer(*args, **kwargs)
+        refs.append(weakref.ref(printer))
+        return printer
+
+    def failing_splice(*args: Any, **kwargs: Any) -> str:
+        raise LookupError("render failed")
+
+    monkeypatch.setattr(api, "Printer", tracked)
+    if fail:
+        monkeypatch.setattr(api.ranges, "splice", failing_splice)
+    for _ in range(3):
+        if fail:
+            with pytest.raises(LookupError, match="render failed"):
+                api.format_text(source, lines=(1, source.count("\n")))
+        else:
+            api.format_text(source, lines=(1, source.count("\n")))
+    gc.collect()
+    assert all(ref() is None for ref in refs)
 
 
 def test_cli_lines(
