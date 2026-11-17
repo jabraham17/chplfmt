@@ -161,8 +161,3 @@ suite and the formatter still require Chapel and its Python bindings.
 - Corpus property tests (marker `corpus`) run over `$CHPL_HOME/modules` (and
   `$CHPL_HOME/test` when present). Per-profile properties use a sample of files
   unless `CHPLFMT_FULL_CORPUS=1`.
-- Memory smoke tests (marker `memory`) measure fresh subprocesses, including
-  Python, Rust, and Chapel allocations. They bound the peak for 25,000 synthetic
-  lines and growth over repeated range requests. Run them serially, like the
-  performance smoke test; CI runs both on corpus shard 1.
-- The design is described in `design.md`.

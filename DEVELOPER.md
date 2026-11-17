@@ -76,33 +76,10 @@ for Python type checking.
   in [`native/core/src/doc/`](native/core/src/doc/).
 - Keep `// chplfmt: off` and extern regions byte-identical. Range formatting
   should not modify unselected text.
-- Document callbacks must not capture the printer or index. Range selections
-  retain documents until rendering finishes, so backreferences can retain an
-  entire input through a cycle that Python cannot traverse through native docs.
-- Native documents canonicalize empty concatenations and share printable ASCII
-  text nodes. Flattening reuses unchanged subtrees; zero-width callbacks and
-  layout controls must not be discarded as empty text.
-- Index rows use packed value buffers and offset pairs. Optional AST locations
-  and extra metadata are sparse, and Python token wrappers share the core token
-  buffer rather than copying token records.
-- Before verification reparses output, the formatter releases its full input
-  index. A compact view retains AST children/spans, tokens, and normalized token
-  positions; verification still performs every semantic and source check.
-- Whole-file formatting renders directly to text, buffering only runs of
-  trailing comments for alignment. The record-producing API remains available
-  for range formatting, with Python line records sharing the native storage.
-- Range statement lists skip unselected siblings before constructing their
-  documents. Exactly-once comment checks cover the selected replacement;
-  unchanged text is spliced by source offsets, with adjacent trailing comments
-  still participating in alignment.
-- `SourceText` caches UTF-8 bytes lazily for text inputs; `from_bytes` retains
-  the caller's original bytes. Source coordinates do not require a second
-  whole-file byte buffer.
 
 ## Validation
 
-See [README.md](README.md#development) for setup and full checks. From the
-repository root, use up to four workers:
+See [README.md](README.md#development) for setup and full checks. Run performance and memory tests serially:
 
 ```sh
 cargo test --manifest-path native/Cargo.toml --workspace --all-targets
@@ -116,17 +93,3 @@ Use [`tests/golden/`](tests/golden/) for output examples,
 [`tests/unit/`](tests/unit/) for components, and
 [`tests/properties/`](tests/properties/) for corpus-wide invariants. The full
 corpus and formatting tests need chapel-py; tests marked `native` do not.
-The memory smoke uses OS process peaks rather than `tracemalloc`, so native
-allocations count. Its fresh-process probe is also usable directly:
-`python tests/memory_probe.py synthetic:25000` or
-`python tests/memory_probe.py path/to/large.chpl --range 100 105`.
-Repeated measurements collect unreachable objects after each request. Some
-chapel-py versions retain native parser memory, so the range smoke compares
-growth against whole-file requests on the same input: less than 24 MiB extra
-growth over twenty requests after five warmups, and a 384 MiB absolute peak
-for either mode. The 25,000-line peak is capped at 512 MiB. macOS additionally
-reports physical footprint, which includes compressed pages; Linux uses peak
-RSS. The control does not assert that the Chapel parser itself is leak-free.
-For detailed original rationale, see [design.md](design.md). The
-[native design note](docs/native-design.md) is a proposal, not a description
-of every current implementation detail.
