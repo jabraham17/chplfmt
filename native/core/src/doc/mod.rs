@@ -1,6 +1,6 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::width;
 
@@ -169,6 +169,31 @@ fn sum_width(parts: &[Doc]) -> i32 {
         .unwrap_or(-1)
 }
 
+static EMPTY: LazyLock<Doc> = LazyLock::new(|| {
+    Doc::new(
+        Kind::Text {
+            s: "".into(),
+            width: 0,
+        },
+        false,
+        0,
+    )
+});
+
+// A fixed-size cache, not an interner that grows with successive input files.
+static ASCII_TEXT: LazyLock<[Doc; 95]> = LazyLock::new(|| {
+    std::array::from_fn(|index| {
+        Doc::new(
+            Kind::Text {
+                s: char::from(index as u8 + b' ').to_string().into(),
+                width: 1,
+            },
+            false,
+            1,
+        )
+    })
+});
+
 impl Doc {
     fn new(kind: Kind, forced: bool, flat_width: i32) -> Self {
         Self(Arc::new(Node {
@@ -179,6 +204,12 @@ impl Doc {
     }
 
     pub fn text(s: &str) -> Result<Self, String> {
+        if s.is_empty() {
+            return Ok(EMPTY.clone());
+        }
+        if s.len() == 1 && (b' '..=b'~').contains(&s.as_bytes()[0]) {
+            return Ok(ASCII_TEXT[(s.as_bytes()[0] - b' ') as usize].clone());
+        }
         if s.contains('\n') {
             return Err(format!("text() must not contain a newline: {}", repr(s)));
         }
@@ -190,7 +221,14 @@ impl Doc {
         Ok(Self::new(Kind::Text { s: s.into(), width }, false, width))
     }
 
-    pub fn concat(parts: Vec<Doc>) -> Self {
+    pub fn concat(mut parts: Vec<Doc>) -> Self {
+        parts.retain(|part| !matches!(&part.0.kind, Kind::Text { s, .. } if s.is_empty()));
+        if parts.is_empty() {
+            return EMPTY.clone();
+        }
+        if parts.len() == 1 {
+            return parts.pop().unwrap();
+        }
         let forced = parts.iter().any(|part| part.0.forced);
         let flat_width = sum_width(&parts);
         Self::new(Kind::Concat(parts.into()), forced, flat_width)
@@ -329,6 +367,7 @@ impl Doc {
             Kind::Group { contents, id, .. } => {
                 let flat = contents.flat();
                 match id {
+                    Some(_) if Arc::ptr_eq(&flat.0, &contents.0) => self.clone(),
                     Some(id) => Self::group(flat, Some(id.clone()), false),
                     None => flat,
                 }
@@ -337,9 +376,19 @@ impl Doc {
             Kind::IfBreak { flat, .. } => flat.flat(),
             Kind::Line(LineKind::Soft) => Self::text("").unwrap(),
             Kind::Line(_) => Self::text(" ").unwrap(),
-            Kind::Concat(parts) | Kind::Fill { parts, .. } => {
-                Self::concat(parts.iter().map(Self::flat).collect())
+            Kind::Concat(parts) => {
+                let flattened: Vec<_> = parts.iter().map(Self::flat).collect();
+                if parts
+                    .iter()
+                    .zip(&flattened)
+                    .all(|(a, b)| Arc::ptr_eq(&a.0, &b.0))
+                {
+                    self.clone()
+                } else {
+                    Self::concat(flattened)
+                }
             }
+            Kind::Fill { parts, .. } => Self::concat(parts.iter().map(Self::flat).collect()),
             Kind::Indent { contents, .. } | Kind::Align(contents) => contents.flat(),
             _ => self.clone(),
         }

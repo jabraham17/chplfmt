@@ -79,6 +79,9 @@ for Python type checking.
 - Document callbacks must not capture the printer or index. Range selections
   retain documents until rendering finishes, so backreferences can retain an
   entire input through a cycle that Python cannot traverse through native docs.
+- Native documents canonicalize empty concatenations and share printable ASCII
+  text nodes. Flattening reuses unchanged subtrees; zero-width callbacks and
+  layout controls must not be discarded as empty text.
 
 ## Validation
 

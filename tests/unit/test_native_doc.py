@@ -65,6 +65,26 @@ def test_native_doc_shape_and_identity() -> None:
     assert native.EMPTY.kind is native.DocKind.TEXT
 
 
+def test_empty_concat_elision_preserves_callbacks() -> None:
+    calls: list[int] = []
+    callback = native.on_render(lambda: calls.append(1))
+    doc = native.concat(native.concat(), "", callback, native.EMPTY)
+    assert doc == callback
+    assert native.render(doc, 80, 2).text == ""
+    assert calls == [1]
+    assert native.concat("", native.concat()) is native.EMPTY
+
+
+def test_flatten_reuses_unchanged_subtrees() -> None:
+    stable = native.concat("left", ",", "right")
+    doc = native.concat(stable, native.line, "tail")
+    flattened = native.flatten(doc)
+    assert flattened is not None
+    assert flattened.parts[0] == stable
+    assert native.flatten(flattened) == flattened
+    assert native.render(flattened, 80, 2).text == "left,right tail"
+
+
 def test_native_doc_builder_errors_and_callbacks() -> None:
     with pytest.raises(ValueError, match=r"text\(\) must not contain a newline"):
         native.text("a\nb")
