@@ -65,4 +65,5 @@ markers = [
   "corpus: property tests over the Chapel corpus (slow)",
   "native: tests that run without chapel-py",
   "perf: performance smoke tests (timing-sensitive)",
+  "memory: native-inclusive memory smoke tests (run serially)",
 ]

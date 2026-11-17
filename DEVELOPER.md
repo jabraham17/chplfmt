@@ -106,8 +106,9 @@ repository root, use up to four workers:
 
 ```sh
 cargo test --manifest-path native/Cargo.toml --workspace --all-targets
-.venv/bin/python -m pytest -n 4 -m "not corpus"
+.venv/bin/python -m pytest -n 4 -m "not corpus and not perf and not memory"
 .venv/bin/python -m pytest -n 4 -m corpus
+.venv/bin/python -m pytest -n 0 -s -m "perf or memory"
 ```
 
 Use [`tests/golden/`](tests/golden/) for output examples,
@@ -115,6 +116,17 @@ Use [`tests/golden/`](tests/golden/) for output examples,
 [`tests/unit/`](tests/unit/) for components, and
 [`tests/properties/`](tests/properties/) for corpus-wide invariants. The full
 corpus and formatting tests need chapel-py; tests marked `native` do not.
+The memory smoke uses OS process peaks rather than `tracemalloc`, so native
+allocations count. Its fresh-process probe is also usable directly:
+`python tests/memory_probe.py synthetic:25000` or
+`python tests/memory_probe.py path/to/large.chpl --range 100 105`.
+Repeated measurements collect unreachable objects after each request. Some
+chapel-py versions retain native parser memory, so the range smoke compares
+growth against whole-file requests on the same input: less than 24 MiB extra
+growth over twenty requests after five warmups, and a 384 MiB absolute peak
+for either mode. The 25,000-line peak is capped at 512 MiB. macOS additionally
+reports physical footprint, which includes compressed pages; Linux uses peak
+RSS. The control does not assert that the Chapel parser itself is leak-free.
 For detailed original rationale, see [design.md](design.md). The
 [native design note](docs/native-design.md) is a proposal, not a description
 of every current implementation detail.

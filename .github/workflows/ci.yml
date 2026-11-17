@@ -128,7 +128,7 @@ jobs:
           python: ${{ matrix.python }}
           image-digest: ${{ fromJSON(needs.images.outputs.digests)[matrix.chapel] }}
       - name: Unit tests
-        run: python -m pytest -q -n 4 -m "not corpus and not perf" tests/unit
+        run: python -m pytest -q -n 4 -m "not corpus and not perf and not memory" tests/unit
       - name: Golden and option tests
         run: python -m pytest -q -n 4 tests/golden tests/options
 
@@ -167,3 +167,6 @@ jobs:
       - name: Performance smoke test
         if: matrix.shard == 1
         run: python -m pytest -q -s -m perf tests/unit
+      - name: Memory smoke tests
+        if: matrix.shard == 1
+        run: python -m pytest -q -s -n 0 -m memory tests/unit
