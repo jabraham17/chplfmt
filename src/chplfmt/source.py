@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from collections.abc import Sequence
 from itertools import repeat
@@ -31,13 +32,13 @@ class SourceText:
     only, as in dyno; a `\\r` right before `\\n` belongs to the line ending.
     """
 
-    data: bytes
+    _data: bytes | None
     text: str
     line_starts: tuple[int, ...]
     uses_crlf: bool
     _ascii: tuple[bool, ...]
 
-    def __init__(self, data: bytes, text: str) -> None:
+    def __init__(self, data: bytes | None, text: str) -> None:
         starts = [0]
         i = text.find("\n")
         while i != -1:
@@ -45,7 +46,7 @@ class SourceText:
             i = text.find("\n", i + 1)
         ends = [*starts[1:], len(text)]
         init = object.__setattr__
-        init(self, "data", data)
+        init(self, "_data", data)
         init(self, "text", text)
         init(self, "line_starts", tuple(starts))
         init(self, "uses_crlf", "\r\n" in text)
@@ -57,6 +58,15 @@ class SourceText:
 
     def __setattr__(self, name: str, value: object) -> None:
         raise AttributeError("SourceText is immutable")
+
+    @property
+    def data(self) -> bytes:
+        """Original UTF-8 bytes, encoded on demand for text inputs."""
+        data = self._data
+        if data is None:
+            data = self.text.encode("utf-8")
+            object.__setattr__(self, "_data", data)
+        return data
 
     @classmethod
     def from_bytes(cls, data: bytes) -> SourceText:
@@ -70,7 +80,9 @@ class SourceText:
 
     @classmethod
     def from_text(cls, text: str) -> SourceText:
-        return cls(text.encode("utf-8"), text)
+        if re.search(r"[\ud800-\udfff]", text):
+            text.encode("utf-8")  # Preserve eager rejection of invalid UTF-8 text.
+        return cls(None, text)
 
     def __repr__(self) -> str:
         return f"SourceText({len(self.text)} chars, {self.line_count} lines)"

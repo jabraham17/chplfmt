@@ -31,9 +31,26 @@ def test_invalid_utf8_is_an_error() -> None:
 def test_from_bytes_keeps_bytes() -> None:
     data = "var s = '\u00e9';\r\n".encode()
     src = SourceText.from_bytes(data)
-    assert src.data == data
+    assert src.data is data
     assert src.text == data.decode()
     assert src.uses_crlf
+
+
+@pytest.mark.parametrize("text", ["var x;\n", "var s = '\u00e9';\r\n"])
+def test_text_bytes_are_lazy_and_cached(text: str) -> None:
+    src = SourceText.from_text(text)
+    assert src._data is None
+    data = src.data
+    assert data == text.encode("utf-8")
+    assert src.data is data
+    with pytest.raises(AttributeError):
+        src.data = b"changed"  # type: ignore[misc]
+
+
+def test_text_rejects_surrogates_before_bytes_are_requested() -> None:
+    with pytest.raises(UnicodeEncodeError) as info:
+        SourceText.from_text("var x;\n\ud800")
+    assert info.value.start == 7
 
 
 def test_lines_lf_and_crlf() -> None:

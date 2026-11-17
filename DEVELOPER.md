@@ -95,6 +95,9 @@ for Python type checking.
   documents. Exactly-once comment checks cover the selected replacement;
   unchanged text is spliced by source offsets, with adjacent trailing comments
   still participating in alignment.
+- `SourceText` caches UTF-8 bytes lazily for text inputs; `from_bytes` retains
+  the caller's original bytes. Source coordinates do not require a second
+  whole-file byte buffer.
 
 ## Validation
 
