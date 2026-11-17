@@ -49,7 +49,9 @@ def peak_footprint() -> int | None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", help="file path, synthetic:LINE_COUNT, or ranges")
+    parser.add_argument(
+        "input", help="file path, synthetic:LINE_COUNT, long-strings, or ranges"
+    )
     parser.add_argument("--iterations", type=int, default=1)
     parser.add_argument("--warmup", type=int, default=0)
     selection = parser.add_mutually_exclusive_group()
@@ -61,7 +63,11 @@ def main() -> None:
     lines = (args.range[0], args.range[1]) if args.range is not None else None
     if lines is not None and not 1 <= lines[0] <= lines[1]:
         parser.error("range must have 1 <= FIRST <= LAST")
-    if args.input.startswith("synthetic:"):
+    if args.input == "long-strings":
+        payload = "x" * 32768
+        source = "".join(f'var s{i}="{payload}";\n' for i in range(128))
+        path = "Strings.chpl"
+    elif args.input.startswith("synthetic:"):
         source = synthetic(int(args.input.split(":")[1]))
         path = "Perf.chpl"
     elif args.input == "ranges":
