@@ -148,7 +148,7 @@ cargo test --manifest-path native/Cargo.toml --workspace --all-targets
   tests/unit/test_lexer.py tests/unit/test_native_doc.py \
   tests/unit/test_source.py
 .venv/bin/python -m pytest -n 4 -m "not corpus and not perf and not memory"
-.venv/bin/python -m pytest -n 4 -m corpus
+.venv/bin/python -m pytest -n 0 --forked -m corpus
 .venv/bin/python -m pytest -n 0 -s -m "perf or memory"
 ```
 
@@ -160,4 +160,5 @@ suite and the formatter still require Chapel and its Python bindings.
   expected `.good` files.
 - Corpus property tests (marker `corpus`) run over `$CHPL_HOME/modules` (and
   `$CHPL_HOME/test` when present). Per-profile properties use a sample of files
-  unless `CHPLFMT_FULL_CORPUS=1`.
+  unless `CHPLFMT_FULL_CORPUS=1`. Run them serially with `--forked` so each
+  test releases native parser memory when its subprocess exits.

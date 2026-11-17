@@ -177,6 +177,15 @@ def test_header_block_comment_stays_put_with_broken_brace() -> None:
     assert fmt(once, brace_style="break") == once
 
 
+@pytest.mark.parametrize("separator", [" ", "\n"])
+def test_function_header_comment_is_emitted_once(separator: str) -> None:
+    source = f"proc f() /* throws */{separator}{{ first(); second(); }}\n"
+    once = fmt(source, brace_style="break")
+    assert once.index("/* throws */") < once.index("{")
+    assert once.count("/* throws */") == 1
+    assert fmt(once, brace_style="break") == once
+
+
 @pytest.mark.parametrize(
     "source",
     [

@@ -84,7 +84,7 @@ See [README.md](README.md#development) for setup and full checks. Run performanc
 ```sh
 cargo test --manifest-path native/Cargo.toml --workspace --all-targets
 .venv/bin/python -m pytest -n 4 -m "not corpus and not perf and not memory"
-.venv/bin/python -m pytest -n 4 -m corpus
+.venv/bin/python -m pytest -n 0 --forked -m corpus
 .venv/bin/python -m pytest -n 0 -s -m "perf or memory"
 ```
 

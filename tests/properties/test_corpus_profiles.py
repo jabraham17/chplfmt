@@ -61,6 +61,7 @@ def profiles() -> dict[str, FormatOptions]:
 
 
 PINNED = [
+    ("brace-style=break", "modules/packages/RecordParser.chpl"),
     ("line-length=40", "modules/internal/ChapelRange.chpl"),
     ("line-length=40", "modules/internal/DefaultSparse.chpl"),
     ("line-length=40", "modules/packages/Python.chpl"),

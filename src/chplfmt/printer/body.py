@@ -270,11 +270,10 @@ class Body:
         return self.single(header, header_broke, kind)
 
     def _split(self, at: int | None) -> tuple[list[Comment], list[Comment]]:
+        cs = self.p.unemitted(self.pre)
         if at is None:
-            return [], self.pre
-        return [c for c in self.pre if c.token < at], [
-            c for c in self.pre if c.token > at
-        ]
+            return [], cs
+        return [c for c in cs if c.token < at], [c for c in cs if c.token > at]
 
     def _with_comments(
         self, header: Doc, broke: bool, cs: list[Comment]
