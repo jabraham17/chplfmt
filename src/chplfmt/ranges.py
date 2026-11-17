@@ -1,14 +1,13 @@
 """Range formatting.
 
-The printer builds the whole file's Doc as usual; every statement list checks
-whether it is the deepest one containing the range and, if so, builds the run
-of selected items at the existing indentation of the run's first line
-(`select`). `splice` renders that run and replaces its source lines.
+Each statement list selects its intersecting run before building documents,
+skipping unselected siblings. Nested lists refine the selection to the deepest
+eligible run, at its existing indentation (`select`). `splice` renders that
+run and replaces its source lines.
 """
 
 from __future__ import annotations
 
-import re
 from bisect import bisect_left
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -89,9 +88,6 @@ def select(p: Printer, elements: Sequence[Element]) -> Selection | None:
     return sel
 
 
-_LINE = re.compile(r"[^\n]*\n|[^\n]+")
-
-
 def _commented_line(p: Printer, starts: list[int], line: int) -> LineRecord | None:
     """Source `line` as code plus trailing `//` comment, if it is exactly that."""
     src = p.source
@@ -141,10 +137,18 @@ def _align_with_context(p: Printer, sel: Selection, records: list[LineRecord]) -
 def splice(source: SourceText, sel: Selection, p: Printer) -> str:
     """`source` with the selected lines replaced by the rendered run."""
     assert sel.doc is not None
-    old = _LINE.findall(source.text)
-    first, last = sel.first_line - 1, sel.last_line
-    eol = "\r\n" if old[first].endswith("\r\n") else "\n"
-    last_eol = old[last - 1][len(old[last - 1].rstrip("\r\n")) :]
+    first = source.line_start(sel.first_line)
+    last = (
+        source.line_start(sel.last_line + 1)
+        if sel.last_line < source.line_count
+        else len(source.text)
+    )
+    eol = (
+        "\r\n"
+        if source.text.startswith("\r\n", source.line_end(sel.first_line))
+        else "\n"
+    )
+    last_eol = source.text[last - 1] in "\r\n"
     rendered = _align_with_context(
         p, sel, render(sel.doc, p.options, base_indent=sel.base).lines
     )
@@ -153,4 +157,4 @@ def splice(source: SourceText, sel: Selection, p: Printer) -> str:
         new = []  # every item was dropped (remove-empty-statements)
     elif not last_eol:
         new[-1] = new[-1].removesuffix(eol)
-    return "".join(old[:first] + new + old[last:])
+    return "".join((source.text[:first], "".join(new), source.text[last:]))

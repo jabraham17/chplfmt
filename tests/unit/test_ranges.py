@@ -8,7 +8,10 @@ import pytest
 from chplfmt import api
 from chplfmt.cli import main
 from chplfmt.config import FormatOptions
+from chplfmt.doc import EMPTY, Doc
+from chplfmt.errors import InternalError
 from chplfmt.printer import Printer
+from chplfmt.printer.core import Element
 
 SRC = """\
 proc f(x:int) {
@@ -128,6 +131,33 @@ def test_no_final_newline() -> None:
 def test_comments_outside_not_normalized() -> None:
     src = "//a\nvar a=1;\n//b\nvar b=2;\n"
     assert fmt(src, 4, 4) == "//a\nvar a=1;\n// b\nvar b = 2;\n"
+
+
+def test_unselected_statement_documents_are_not_built(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = "//a\nvar a=1;\nproc f() {\n  var b=2;\n  //c\n  var c=3;\n}\nvar d=4;\n"
+    printed: list[int] = []
+    original = Printer._element
+
+    def tracked(p: Printer, el: Element) -> tuple[int, Doc] | None:
+        printed.append(p.tokens[el.first].start[0])
+        return original(p, el)
+
+    monkeypatch.setattr(Printer, "_element", tracked)
+    assert fmt(src, 6, 6) == src.replace("//c", "// c").replace(
+        "var c=3;", "var c = 3;"
+    )
+    assert printed == [3, 6]
+
+
+def test_selected_comments_still_checked(monkeypatch: pytest.MonkeyPatch) -> None:
+    def lost_comment(p: Printer, i: int) -> Doc:
+        return EMPTY
+
+    monkeypatch.setattr(Printer, "comment_doc", lost_comment)
+    with pytest.raises(InternalError, match="printed 0 times"):
+        fmt("//a\nvar a=1;\n//b\nvar b=2;\n", 4, 4)
 
 
 def test_trailing_comments_align_with_unchanged_neighbors() -> None:

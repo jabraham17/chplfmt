@@ -91,6 +91,10 @@ for Python type checking.
 - Whole-file formatting renders directly to text, buffering only runs of
   trailing comments for alignment. The record-producing API remains available
   for range formatting, with Python line records sharing the native storage.
+- Range statement lists skip unselected siblings before constructing their
+  documents. Exactly-once comment checks cover the selected replacement;
+  unchanged text is spliced by source offsets, with adjacent trailing comments
+  still participating in alignment.
 
 ## Validation
 

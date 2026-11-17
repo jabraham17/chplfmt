@@ -352,9 +352,21 @@ class Printer:
         return [c for c in found if c.token not in done]
 
     def check_comments(self) -> None:
-        """Raise `InternalError` unless every attached comment was emitted once."""
-        counts = Counter(self.emitted)
-        for i in self.trivia.comments:
+        """Check exactly-once emission in the text that will be replaced."""
+        comments: Iterable[int] = self.trivia.comments
+        emitted: Iterable[int] = self.emitted
+        if self.range_lines is not None:
+            sel = self.selection
+            if sel is None or sel.doc is None:
+                return
+
+            def selected(i: int) -> bool:
+                return sel.first_line <= self.tokens[i].start[0] <= sel.last_line
+
+            comments = filter(selected, comments)
+            emitted = filter(selected, emitted)
+        counts = Counter(emitted)
+        for i in comments:
             n = counts.pop(i, 0)
             if n != 1:
                 self._comment_error(i, f"printed {n} times")
@@ -545,6 +557,8 @@ class Printer:
         start = 0
         self.list_depth += 1
         for k, el in enumerate(elements):
+            if sel is not None and not sel.lo <= k < sel.hi:
+                continue
             if sel is not None and k == sel.lo:
                 self.indent, start = sel.base, len(items)
             item = self._element(el)
