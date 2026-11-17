@@ -15,6 +15,10 @@ def render(doc: DocLike, options: FormatOptions, base_indent: int = 0) -> Render
     return _native.render(doc, options.line_length, options.tab_size, base_indent)
 
 
+def render_text(doc: DocLike, options: FormatOptions, base_indent: int = 0) -> str:
+    return _native.render_text(doc, options.line_length, options.tab_size, base_indent)
+
+
 def flat_width(doc: DocLike, options: FormatOptions) -> int | None:
     return _native.flat_width(doc, options.tab_size)
 

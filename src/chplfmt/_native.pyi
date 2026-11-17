@@ -214,6 +214,9 @@ class RenderResult:
 def render(
     doc: DocLike, line_length: int, tab_size: int, base_indent: int = 0
 ) -> RenderResult: ...
+def render_text(
+    doc: DocLike, line_length: int, tab_size: int, base_indent: int = 0
+) -> str: ...
 def flat_width(doc: DocLike, tab_size: int) -> int | None: ...
 def align_trailing_comments(
     lines: Sequence[LineRecord], line_length: int, tab_size: int

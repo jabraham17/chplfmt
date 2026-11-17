@@ -29,6 +29,42 @@ pub struct RenderOutput {
     pub stats: RenderStats,
 }
 
+struct TextOutput {
+    text: String,
+    pending: Vec<LineRecord>,
+    first: bool,
+    opts: RenderOptions,
+}
+
+impl TextOutput {
+    fn new(opts: RenderOptions) -> Self {
+        Self {
+            text: String::new(),
+            pending: Vec::new(),
+            first: true,
+            opts,
+        }
+    }
+
+    fn push(&mut self, line: LineRecord) {
+        let boundary = line.trailing_comment.is_none() || line.verbatim || line.code.is_empty();
+        self.pending.push(line);
+        if boundary {
+            self.flush();
+        }
+    }
+
+    fn flush(&mut self) {
+        append_aligned(&self.pending, self.opts, &mut self.text, &mut self.first);
+        self.pending.clear();
+    }
+}
+
+enum Output {
+    Records(Vec<LineRecord>),
+    Text(TextOutput),
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
     Flat,
@@ -112,7 +148,7 @@ struct Printer<'s, 'r, 'd> {
     protect: usize,
     comment: Option<String>,
     line_verbatim: bool,
-    records: Vec<LineRecord>,
+    output: Output,
     suffixes: Vec<Cmd<'d>>,
     remeasure: bool,
 }
@@ -133,7 +169,7 @@ impl<'s, 'r, 'd> Printer<'s, 'r, 'd> {
             protect: 0,
             comment: None,
             line_verbatim: false,
-            records: Vec::new(),
+            output: Output::Records(Vec::new()),
             suffixes: Vec::new(),
             remeasure: false,
         }
@@ -141,14 +177,20 @@ impl<'s, 'r, 'd> Printer<'s, 'r, 'd> {
 
     fn finish(&mut self) {
         if !self.measure {
-            let code = self.line[..self.protect].to_owned()
-                + self.line[self.protect..].trim_end_matches([' ', '\t']);
-            self.records.push(LineRecord {
-                code,
+            let end = self.protect
+                + self.line[self.protect..]
+                    .trim_end_matches([' ', '\t'])
+                    .len();
+            self.line.truncate(end);
+            let record = LineRecord {
+                code: std::mem::take(&mut self.line),
                 trailing_comment: self.comment.take(),
                 verbatim: self.line_verbatim,
-            });
-            self.line.clear();
+            };
+            match &mut self.output {
+                Output::Records(records) => records.push(record),
+                Output::Text(text) => text.push(record),
+            }
             self.protect = 0;
         }
         self.line_verbatim = false;
@@ -798,6 +840,19 @@ impl<'s, 'r, 'd> Printer<'s, 'r, 'd> {
 }
 
 pub fn render(doc: &Doc, opts: RenderOptions, base_indent: u32) -> Result<RenderOutput, HostError> {
+    render_inner(doc, opts, base_indent, true)
+}
+
+pub fn render_text(doc: &Doc, opts: RenderOptions, base_indent: u32) -> Result<String, HostError> {
+    Ok(render_inner(doc, opts, base_indent, false)?.text)
+}
+
+fn render_inner(
+    doc: &Doc,
+    opts: RenderOptions,
+    base_indent: u32,
+    records: bool,
+) -> Result<RenderOutput, HostError> {
     let mut shared = Shared {
         opts,
         limit: if opts.line_length == 0 {
@@ -813,11 +868,23 @@ pub fn render(doc: &Doc, opts: RenderOptions, base_indent: u32) -> Result<Render
         stats: RenderStats::default(),
     };
     let mut printer = Printer::new(&mut shared, None, false, base_indent as i64);
+    if !records {
+        printer.output = Output::Text(TextOutput::new(opts));
+    }
     printer.line.push_str(&" ".repeat(base_indent as usize));
     printer.run(&mut vec![Cmd::doc(base_indent as i64, Mode::Break, doc)])?;
     printer.finish();
-    let lines = printer.records;
-    let text = align_trailing_comments(&lines, opts.line_length, opts.tab_size).join("\n");
+    let (text, lines) = match printer.output {
+        Output::Records(lines) => {
+            let mut text = String::new();
+            append_aligned(&lines, opts, &mut text, &mut true);
+            (text, lines)
+        }
+        Output::Text(mut output) => {
+            output.flush();
+            (output.text, Vec::new())
+        }
+    };
     Ok(RenderOutput {
         text,
         lines,
@@ -851,33 +918,65 @@ pub fn flat_width(doc: &Doc, tab_size: u32) -> Result<Option<u32>, HostError> {
     Ok(Some(printer.pos as u32))
 }
 
-pub fn align_trailing_comments(
-    lines: &[LineRecord],
+pub fn align_trailing_comments<'a>(
+    lines: impl IntoIterator<Item = &'a LineRecord>,
     line_length: u32,
     tab_size: u32,
 ) -> Vec<String> {
+    let mut out = Vec::new();
+    align_lines(lines, line_length, tab_size, |code, padding, comment| {
+        let mut line = code.to_owned();
+        line.extend(std::iter::repeat_n(' ', padding));
+        if let Some(comment) = comment {
+            line.push_str(comment);
+        }
+        out.push(line);
+    });
+    out
+}
+
+fn append_aligned(lines: &[LineRecord], opts: RenderOptions, text: &mut String, first: &mut bool) {
+    align_lines(
+        lines,
+        opts.line_length,
+        opts.tab_size,
+        |code, padding, comment| {
+            if !*first {
+                text.push('\n');
+            }
+            *first = false;
+            text.push_str(code);
+            text.extend(std::iter::repeat_n(' ', padding));
+            if let Some(comment) = comment {
+                text.push_str(comment);
+            }
+        },
+    );
+}
+
+fn align_lines<'a>(
+    lines: impl IntoIterator<Item = &'a LineRecord>,
+    line_length: u32,
+    tab_size: u32,
+    mut emit: impl FnMut(&str, usize, Option<&str>),
+) {
     let limit = if line_length == 0 {
         i64::MAX
     } else {
         line_length as i64
     };
-    let mut out = Vec::with_capacity(lines.len());
     let mut run: Vec<(&str, i64, &str)> = Vec::new();
     let mut col = 0;
     let mut allowed = i64::MAX;
     for rec in lines {
         let Some(comment) = rec.trailing_comment.as_deref() else {
-            flush(&mut run, col, &mut out);
-            out.push(rec.code.clone());
+            flush(&mut run, col, &mut emit);
+            emit(&rec.code, 0, None);
             continue;
         };
         if rec.verbatim || rec.code.is_empty() {
-            flush(&mut run, col, &mut out);
-            out.push(if rec.code.is_empty() {
-                comment.to_owned()
-            } else {
-                format!("{} {comment}", rec.code)
-            });
+            flush(&mut run, col, &mut emit);
+            emit(&rec.code, usize::from(!rec.code.is_empty()), Some(comment));
             continue;
         }
         let width =
@@ -890,7 +989,7 @@ pub fn align_trailing_comments(
             i64::MAX
         };
         if !run.is_empty() && col.max(width) + 1 > allowed.min(own) {
-            flush(&mut run, col, &mut out);
+            flush(&mut run, col, &mut emit);
         }
         if run.is_empty() {
             col = width;
@@ -901,16 +1000,16 @@ pub fn align_trailing_comments(
         }
         run.push((&rec.code, width, comment));
     }
-    flush(&mut run, col, &mut out);
-    out
+    flush(&mut run, col, &mut emit);
 }
 
-fn flush(run: &mut Vec<(&str, i64, &str)>, col: i64, out: &mut Vec<String>) {
+fn flush(
+    run: &mut Vec<(&str, i64, &str)>,
+    col: i64,
+    emit: &mut impl FnMut(&str, usize, Option<&str>),
+) {
     for (code, width, comment) in run.drain(..) {
-        out.push(format!(
-            "{code}{}{comment}",
-            " ".repeat((col + 1 - width) as usize)
-        ));
+        emit(code, (col + 1 - width) as usize, Some(comment));
     }
 }
 

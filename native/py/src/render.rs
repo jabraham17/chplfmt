@@ -17,7 +17,14 @@ fn host_error(error: HostError) -> PyErr {
 
 #[pyclass(frozen, name = "LineRecord")]
 struct PyLineRecord {
-    value: CoreLineRecord,
+    records: Arc<Vec<CoreLineRecord>>,
+    index: usize,
+}
+
+impl PyLineRecord {
+    fn value(&self) -> &CoreLineRecord {
+        &self.records[self.index]
+    }
 }
 
 #[pymethods]
@@ -26,33 +33,34 @@ impl PyLineRecord {
     #[pyo3(signature = (code, trailing_comment=None, verbatim=false))]
     fn new(code: String, trailing_comment: Option<String>, verbatim: bool) -> Self {
         Self {
-            value: CoreLineRecord {
+            records: Arc::new(vec![CoreLineRecord {
                 code,
                 trailing_comment,
                 verbatim,
-            },
+            }]),
+            index: 0,
         }
     }
 
     #[getter]
     fn code(&self) -> &str {
-        &self.value.code
+        &self.value().code
     }
 
     #[getter]
     fn trailing_comment(&self) -> Option<&str> {
-        self.value.trailing_comment.as_deref()
+        self.value().trailing_comment.as_deref()
     }
 
     #[getter]
     fn verbatim(&self) -> bool {
-        self.value.verbatim
+        self.value().verbatim
     }
 
     fn __richcmp__(&self, other: &Bound<'_, PyAny>, op: CompareOp) -> bool {
         let equal = other
             .extract::<PyRef<'_, Self>>()
-            .is_ok_and(|other| self.value == other.value);
+            .is_ok_and(|other| self.value() == other.value());
         match op {
             CompareOp::Eq => equal,
             CompareOp::Ne => !equal,
@@ -88,7 +96,9 @@ impl PyRenderStats {
 
 #[pyclass(frozen, name = "RenderResult")]
 struct PyRenderResult {
-    value: core::RenderOutput,
+    text: String,
+    records: Arc<Vec<CoreLineRecord>>,
+    stats: core::RenderStats,
     lines: GILOnceCell<Py<PyList>>,
 }
 
@@ -96,7 +106,7 @@ struct PyRenderResult {
 impl PyRenderResult {
     #[getter]
     fn text(&self) -> &str {
-        &self.value.text
+        &self.text
     }
 
     #[getter]
@@ -104,19 +114,13 @@ impl PyRenderResult {
         Ok(self
             .lines
             .get_or_try_init(py, || {
-                let records = self
-                    .value
-                    .lines
-                    .iter()
-                    .map(|record| {
+                let records = (0..self.records.len())
+                    .map(|index| {
                         Py::new(
                             py,
                             PyLineRecord {
-                                value: CoreLineRecord {
-                                    code: record.code.clone(),
-                                    trailing_comment: record.trailing_comment.clone(),
-                                    verbatim: record.verbatim,
-                                },
+                                records: self.records.clone(),
+                                index,
                             },
                         )
                     })
@@ -131,9 +135,9 @@ impl PyRenderResult {
         Py::new(
             py,
             PyRenderStats {
-                fits_scans: self.value.stats.fits_scans,
-                all_lines_dry_runs: self.value.stats.all_lines_dry_runs,
-                memo_hits: self.value.stats.memo_hits,
+                fits_scans: self.stats.fits_scans,
+                all_lines_dry_runs: self.stats.all_lines_dry_runs,
+                memo_hits: self.stats.memo_hits,
             },
         )
     }
@@ -156,9 +160,29 @@ fn render(
     )
     .map_err(host_error)?;
     Ok(PyRenderResult {
-        value,
+        text: value.text,
+        records: Arc::new(value.lines),
+        stats: value.stats,
         lines: GILOnceCell::new(),
     })
+}
+
+#[pyfunction(signature = (doc, line_length, tab_size, base_indent=0))]
+fn render_text(
+    doc: &Bound<'_, PyAny>,
+    line_length: u32,
+    tab_size: u32,
+    base_indent: u32,
+) -> PyResult<String> {
+    core::render_text(
+        &doclike(doc)?,
+        RenderOptions {
+            line_length,
+            tab_size,
+        },
+        base_indent,
+    )
+    .map_err(host_error)
 }
 
 #[pyfunction]
@@ -172,20 +196,16 @@ fn align_trailing_comments(
     line_length: u32,
     tab_size: u32,
 ) -> PyResult<Vec<String>> {
-    let records = lines
+    let records: Vec<Py<PyLineRecord>> = lines
         .try_iter()?
-        .map(|line| {
-            let line = line?;
-            let record = line.extract::<PyRef<'_, PyLineRecord>>()?;
-            Ok(CoreLineRecord {
-                code: record.value.code.clone(),
-                trailing_comment: record.value.trailing_comment.clone(),
-                verbatim: record.value.verbatim,
-            })
-        })
+        .map(|line| line?.extract())
         .collect::<PyResult<Vec<_>>>()?;
+    let records: Vec<_> = records
+        .iter()
+        .map(|record| record.borrow(lines.py()))
+        .collect();
     Ok(core::align_trailing_comments(
-        &records,
+        records.iter().map(|record| record.value()),
         line_length,
         tab_size,
     ))
@@ -196,7 +216,9 @@ pub fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyRenderResult>()?;
     module.add_class::<PyRenderStats>()?;
     module.add_function(wrap_pyfunction!(render, module)?)?;
+    module.add_function(wrap_pyfunction!(render_text, module)?)?;
     module.add_function(wrap_pyfunction!(flat_width, module)?)?;
     module.add_function(wrap_pyfunction!(align_trailing_comments, module)?)?;
     Ok(())
 }
+use std::sync::Arc;

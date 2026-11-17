@@ -28,6 +28,7 @@ from chplfmt.doc import (
     literalline,
     on_render,
     render,
+    render_text,
     softline,
     suffix_break,
     text,
@@ -129,6 +130,34 @@ def test_text_and_concat() -> None:
     assert r(concat("a", text("b"), concat("c", "d"))) == "abcd"
     with pytest.raises(ValueError):
         text("a\nb")
+
+
+@pytest.mark.parametrize("length", [0, 20, 80])
+def test_text_only_render_matches_records(length: int) -> None:
+    doc = concat(
+        "a",
+        trailing_comment("// a"),
+        hardline,
+        "longer",
+        trailing_comment("// b"),
+        hardline,
+        verbatim("raw  \ntext\t", bol=True),
+        hardline,
+        trailing_comment("// alone"),
+        hardline,
+        group(concat("prefix", line, "suffix")),
+        hardline,
+    )
+    opts = FormatOptions(line_length=length)
+    assert (
+        render_text(doc, opts, base_indent=3) == render(doc, opts, base_indent=3).text
+    )
+
+
+def test_line_records_outlive_render_result() -> None:
+    lines = render(concat("x", trailing_comment("// note")), FormatOptions()).lines
+    assert lines[0].code == "x"
+    assert align_trailing_comments(lines, 80, 2) == ["x // note"]
 
 
 def test_group_fits_at_exact_width() -> None:

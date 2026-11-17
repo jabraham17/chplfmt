@@ -88,6 +88,9 @@ for Python type checking.
 - Before verification reparses output, the formatter releases its full input
   index. A compact view retains AST children/spans, tokens, and normalized token
   positions; verification still performs every semantic and source check.
+- Whole-file formatting renders directly to text, buffering only runs of
+  trailing comments for alignment. The record-producing API remains available
+  for range formatting, with Python line records sharing the native storage.
 
 ## Validation
 

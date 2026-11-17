@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from chplfmt import ranges
 from chplfmt._chapel import Diagnostic, parse_text
 from chplfmt.config import FormatOptions, load_options
-from chplfmt.doc import render
+from chplfmt.doc import render_text
 from chplfmt.errors import ChplParseError, FormatError, VerificationError
 from chplfmt.printer import Printer, PrintReport
 from chplfmt.source import SourceText
@@ -224,7 +224,7 @@ def _print_text(
     index: TokenIndex, options: FormatOptions, path: str
 ) -> tuple[str, PrintReport]:
     p = Printer(index, options, path=path)
-    return render(p.print_file(), options).text, p.report
+    return render_text(p.print_file(), options), p.report
 
 
 def _print_range(

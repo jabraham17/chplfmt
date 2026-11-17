@@ -36,6 +36,7 @@ from chplfmt.doc.render import (
     align_trailing_comments,
     flat_width,
     render,
+    render_text,
 )
 
 __all__ = [
@@ -67,6 +68,7 @@ __all__ = [
     "literalline",
     "on_render",
     "render",
+    "render_text",
     "softline",
     "suffix_break",
     "text",
