@@ -19,7 +19,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8",
+  # pytest-forked cannot marshal pytest 9.2's structured NodeId in reports.
+  "pytest>=8,<9.2",
   "pytest-forked>=1.6",
   "pytest-xdist>=3",
   "black>=24",

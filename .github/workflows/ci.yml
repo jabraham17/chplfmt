@@ -158,6 +158,8 @@ jobs:
         run: |
           echo "CHPL_HOME=$CHPL_HOME"
           ls -d "$CHPL_HOME/modules" "$CHPL_HOME/test" 2>/dev/null || true
+      - name: Forked runner smoke test
+        run: python -m pytest -q -n 0 --forked tests/unit/test_source.py
       - name: Corpus properties
         run: >
           python -m pytest -q -n 0 --forked --tb=short -m corpus tests/properties
