@@ -7,14 +7,17 @@ enabled ones to both sides before comparing.
 
 from __future__ import annotations
 
+from array import array
 from bisect import bisect_right
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import ExitStack
 from dataclasses import dataclass
 from functools import cache
+from itertools import zip_longest
 from typing import Any, cast
 
 from chplfmt._chapel import ParseResult, chapel, parse_text
+from chplfmt._native import VerificationIndex
 from chplfmt.comments import expected_comment_text
 from chplfmt.config import FormatOptions
 from chplfmt.errors import VerificationError
@@ -337,7 +340,11 @@ def fingerprint(
 
 
 def _attrs_equal(
-    x: Node, y: Node, ia: TokenIndex, ib: TokenIndex, ignored: frozenset[str]
+    x: Node,
+    y: Node,
+    ia: VerificationIndex,
+    ib: VerificationIndex,
+    ignored: frozenset[str],
 ) -> bool:
     """`semantic_attrs(x) == semantic_attrs(y)` for nodes of the same class."""
     steps, is_literal, has_actuals = _steps(type(x), ignored)
@@ -364,8 +371,8 @@ def _attrs_equal(
 def _compare_ast(
     a: Sequence[Node],
     b: Sequence[Node],
-    ia: TokenIndex,
-    ib: TokenIndex,
+    ia: VerificationIndex,
+    ib: VerificationIndex,
     ignore: _Ignore,
 ) -> tuple[Node | None, Node | None] | None:
     """The first pair of nodes that differ, in preorder."""
@@ -398,7 +405,7 @@ def _compare_ast(
     return None
 
 
-def _node_pos(index: TokenIndex, node: Node | None) -> Pos:
+def _node_pos(index: VerificationIndex, node: Node | None) -> Pos:
     if node is None:
         return UNKNOWN
     sp = index.node_span(node)
@@ -418,30 +425,36 @@ def _in_spans(offset: int, spans: Sequence[tuple[int, int]], starts: list[int]) 
 
 class _Side:
     def __init__(self, index: TokenIndex, removed: set[int]) -> None:
-        self.index = index
+        self.index = index.verification_view()
         self.source = index.source
         self.spans = verbatim_spans(index)
         starts = [s for s, _ in self.spans]
         tokens = index.tokens
-        self.code = [
-            i
-            for i, t in enumerate(tokens[:-1])
-            if not t.is_comment and i not in removed
-        ]
-        self.comments = [
-            i
-            for i, t in enumerate(tokens)
-            if t.is_comment and not _in_spans(t.start_offset, self.spans, starts)
-        ]
+        self.code = array(
+            "I",
+            (
+                i
+                for i in range(len(tokens) - 1)
+                if not tokens[i].is_comment and i not in removed
+            ),
+        )
+        self.comments = array(
+            "I",
+            (
+                i
+                for i, t in enumerate(tokens)
+                if t.is_comment and not _in_spans(t.start_offset, self.spans, starts)
+            ),
+        )
 
-    def pos(self, seq: list[int], k: int) -> Pos:
+    def pos(self, seq: Sequence[int], k: int) -> Pos:
         tokens = self.index.tokens
         return tokens[seq[k]].start if k < len(seq) else tokens[-1].start
 
 
-def _first_difference(xs: Sequence[str], ys: Sequence[str]) -> int | None:
-    for k in range(max(len(xs), len(ys))):
-        if k >= len(xs) or k >= len(ys) or xs[k] != ys[k]:
+def _first_difference(xs: Iterable[str], ys: Iterable[str]) -> int | None:
+    for k, (x, y) in enumerate(zip_longest(xs, ys)):
+        if x != y:
             return k
     return None
 
@@ -451,20 +464,18 @@ def _offset_pos(source: SourceText, offset: int) -> Pos:
 
 
 class _Verifier:
-    def __init__(
-        self, path: str, options: FormatOptions, a: TokenIndex, b: TokenIndex
-    ) -> None:
+    def __init__(self, path: str, options: FormatOptions, a: _Side, b: _Side) -> None:
         self.path = path
         self.options = options
-        self.ia = a
-        self.ib = b
+        self.ia = a.index
+        self.ib = b.index
         rules = [r for r in RULES if r.enabled(options)]
         self.ignore = _Ignore(
             frozenset[str]().union(*(n.ignored_attrs for n in rules)),
             any(n.drops_empty_stmts for n in rules),
         )
-        self.a = _Side(a, set[int]().union(*(n.removable_tokens(a) for n in rules)))
-        self.b = _Side(b, set[int]().union(*(n.removable_tokens(b) for n in rules)))
+        self.a = a
+        self.b = b
         self.formatted_lines: tuple[int, int] | None = None
 
     def fail(self, check: str, input_pos: Pos, output_pos: Pos) -> VerificationError:
@@ -480,7 +491,7 @@ class _Verifier:
     def check_tokens(self) -> None:
         ta, tb = self.ia.tokens, self.ib.tokens
         k = _first_difference(
-            [ta[i].text for i in self.a.code], [tb[i].text for i in self.b.code]
+            (ta[i].text for i in self.a.code), (tb[i].text for i in self.b.code)
         )
         if k is not None:
             raise self.fail(
@@ -512,13 +523,14 @@ class _Verifier:
 
     def check_verbatim(self) -> None:
         sa, sb = self.a.source, self.b.source
-        xs = [sa.text[s:e] for s, e in self.a.spans]
-        ys = [sb.text[s:e] for s, e in self.b.spans]
-        k = _first_difference(xs, ys)
+        xs, ys = self.a.spans, self.b.spans
+        k = _first_difference(
+            (sa.text[s:e] for s, e in xs), (sb.text[s:e] for s, e in ys)
+        )
         if k is None:
             return
         if k < len(xs) and k < len(ys):
-            x, y = xs[k], ys[k]
+            x, y = sa.text[slice(*xs[k])], sb.text[slice(*ys[k])]
             n = next(
                 (i for i, (p, q) in enumerate(zip(x, y, strict=False)) if p != q),
                 min(len(x), len(y)),
@@ -535,6 +547,15 @@ class _Verifier:
         )
 
 
+def prepare_input(index: TokenIndex, options: FormatOptions) -> _Side:
+    """Keep only the AST/token view and normalizations needed for verification."""
+    removed: set[int] = set()
+    for rule in RULES:
+        if rule.enabled(options):
+            removed.update(rule.removable_tokens(index))
+    return _Side(index, removed)
+
+
 def verify(
     input_text: str,
     output_text: str,
@@ -543,11 +564,13 @@ def verify(
     *,
     input_parse: ParseResult | None = None,
     input_index: TokenIndex | None = None,
+    input_snapshot: _Side | None = None,
     formatted_lines: tuple[int, int] | None = None,
 ) -> None:
     """Raise `VerificationError` unless `output_text` is a faithful formatting.
 
     `input_parse` and `input_index` (of `input_text`) are reused when given.
+    The formatter supplies `input_snapshot` so its full input index can be freed.
     With `formatted_lines` (range formatting), comments of input lines outside
     that range must be unchanged.
     """
@@ -556,14 +579,21 @@ def verify(
         if out.errors:
             d = out.errors[0]
             raise VerificationError(path, "reparse", UNKNOWN, (d.line, d.col))
+        if input_snapshot is None:
+            if input_index is None:
+                inp = input_parse or stack.enter_context(parse_text(input_text, path))
+                input_index = TokenIndex.build(
+                    SourceText.from_text(input_text), inp.asts
+                )
+            input_snapshot = prepare_input(input_index, options)
+            input_index = None
         try:
             ib = TokenIndex.build(SourceText.from_text(output_text), out.asts)
         except LexError as e:
             raise VerificationError(path, "reparse", UNKNOWN, e.pos) from e
-        if input_index is None:
-            inp = input_parse or stack.enter_context(parse_text(input_text, path))
-            input_index = TokenIndex.build(SourceText.from_text(input_text), inp.asts)
-        v = _Verifier(path, options, input_index, ib)
+        output_snapshot = prepare_input(ib, options)
+        del ib
+        v = _Verifier(path, options, input_snapshot, output_snapshot)
         v.formatted_lines = formatted_lines
         v.check_ast()
         v.check_tokens()

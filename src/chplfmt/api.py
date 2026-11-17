@@ -18,7 +18,7 @@ from chplfmt.errors import ChplParseError, FormatError, VerificationError
 from chplfmt.printer import Printer, PrintReport
 from chplfmt.source import SourceText
 from chplfmt.tokens import TokenIndex
-from chplfmt.verify import verify
+from chplfmt.verify import prepare_input, verify
 
 __all__ = [
     "ChplParseError",
@@ -196,20 +196,26 @@ def format_text(
         else:
             result, report, formatted = _print_range(index, options, logical, lines)
         if not debug.skip_verify:
+            snapshot = prepare_input(index, options)
+            del index
             try:
                 verify(
                     text,
                     result,
                     logical,
                     options,
-                    input_parse=parsed,
-                    input_index=index,
+                    input_snapshot=snapshot,
                     formatted_lines=formatted,
                 )
             except VerificationError:
                 if debug.dump_failed_dir is not None:
                     _dump_failed(debug.dump_failed_dir, logical, result)
                 raise
+            finally:
+                del snapshot
+        else:
+            del index
+    del parsed
     edits = compute_edits(text, result)
     return FormatResult(result, result != text, edits, report=report)
 

@@ -125,7 +125,21 @@ pub struct TokenIndex {
     pub problems: Vec<(NodeId, NodeId)>,
 }
 
+pub struct AstIndex {
+    pub spans: Vec<Option<Span>>,
+    pub kids: Vec<NodeId>,
+    pub kid_range: Vec<(u32, u32)>,
+}
+
 impl TokenIndex {
+    pub fn ast_index(&self) -> AstIndex {
+        AstIndex {
+            spans: self.spans.clone(),
+            kids: self.facts.kids.clone(),
+            kid_range: self.facts.kid_range.clone(),
+        }
+    }
+
     pub fn new(text: &str, tokens: impl Into<Arc<Vec<Token>>>, facts: AstFacts) -> Self {
         let tokens = tokens.into();
         let count = facts.class.len();

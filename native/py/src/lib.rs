@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use chplfmt_core::index::{NodeId, TokenIndex as CoreIndex};
+use chplfmt_core::index::{AstIndex, NodeId, TokenIndex as CoreIndex};
 use chplfmt_core::lexer::scan::{self, LexErrorKind};
 use chplfmt_core::lexer::token::{Token as CoreToken, TokenKind as CoreKind, NO_MATCH};
 use pyo3::class::basic::CompareOp;
@@ -295,6 +295,72 @@ struct NativeIndex {
     comment: Py<PyAny>,
 }
 
+#[pyclass]
+struct VerificationIndex {
+    value: AstIndex,
+    nodes: Vec<Py<PyAny>>,
+    id_of: Py<PyDict>,
+    tokens: Py<PyList>,
+    source: Py<PyAny>,
+    roots: Py<PyAny>,
+}
+
+#[pymethods]
+impl VerificationIndex {
+    fn __traverse__(&self, visit: PyVisit<'_>) -> Result<(), PyTraverseError> {
+        for node in &self.nodes {
+            visit.call(node)?;
+        }
+        visit.call(&self.id_of)?;
+        visit.call(&self.tokens)?;
+        visit.call(&self.source)?;
+        visit.call(&self.roots)?;
+        Ok(())
+    }
+
+    fn __clear__(&mut self, py: Python<'_>) {
+        self.nodes.clear();
+        self.id_of = PyDict::new(py).unbind();
+        self.tokens = PyList::empty(py).unbind();
+        self.source = py.None();
+        self.roots = py.None();
+    }
+
+    #[getter]
+    fn source(&self, py: Python<'_>) -> Py<PyAny> {
+        self.source.clone_ref(py)
+    }
+
+    #[getter]
+    fn roots(&self, py: Python<'_>) -> Py<PyAny> {
+        self.roots.clone_ref(py)
+    }
+
+    #[getter]
+    fn tokens(&self, py: Python<'_>) -> Py<PyList> {
+        self.tokens.clone_ref(py)
+    }
+
+    fn node_span(&self, node: &Bound<'_, PyAny>) -> PyResult<Option<(u32, u32)>> {
+        let Some(id) = self.id_of.bind(node.py()).get_item(node)? else {
+            return Ok(None);
+        };
+        Ok(self.value.spans[id.extract::<usize>()?])
+    }
+
+    fn ast_children(&self, node: &Bound<'_, PyAny>) -> PyResult<Vec<Py<PyAny>>> {
+        let py = node.py();
+        let id = self.id_of.bind(py).get_item(node)?.ok_or_else(|| {
+            PyValueError::new_err("node does not belong to this verification index")
+        })?;
+        let (start, end) = self.value.kid_range[id.extract::<usize>()?];
+        Ok(self.value.kids[start as usize..end as usize]
+            .iter()
+            .map(|&kid| self.nodes[kid as usize].clone_ref(py))
+            .collect())
+    }
+}
+
 impl NativeIndex {
     fn node_id(&self, node: &Bound<'_, PyAny>) -> PyResult<Option<NodeId>> {
         self.id_of
@@ -357,6 +423,17 @@ impl NativeIndex {
     #[getter]
     fn tokens(&self, py: Python<'_>) -> Py<PyList> {
         self.tokens.clone_ref(py)
+    }
+
+    fn verification_view(&self, py: Python<'_>) -> VerificationIndex {
+        VerificationIndex {
+            value: self.value.ast_index(),
+            nodes: self.nodes.iter().map(|node| node.clone_ref(py)).collect(),
+            id_of: self.id_of.clone_ref(py),
+            tokens: self.tokens.clone_ref(py),
+            source: self.source.clone_ref(py),
+            roots: self.roots.clone_ref(py),
+        }
     }
 
     #[getter]
@@ -649,6 +726,7 @@ fn _native(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PyTokenKind>()?;
     module.add_class::<PyToken>()?;
     module.add_class::<NativeIndex>()?;
+    module.add_class::<VerificationIndex>()?;
     module.add("NativeLexError", module.py().get_type::<NativeLexError>())?;
     module.add_function(wrap_pyfunction!(lex, module)?)?;
     module.add_function(wrap_pyfunction!(build_index, module)?)?;

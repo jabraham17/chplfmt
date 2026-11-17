@@ -1,3 +1,4 @@
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -361,6 +362,24 @@ def test_format_text_verifies_and_dumps(
 
 def test_format_text_normalizes_comments() -> None:
     assert api.format_text("//x\t \nvar x;\n").text == "// x\nvar x;\n"
+
+
+def test_format_releases_full_index_before_reindexing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = TokenIndex.build
+    refs: list[weakref.ReferenceType[TokenIndex]] = []
+
+    def build(cls: type[TokenIndex], source: SourceText, asts: Any) -> TokenIndex:
+        assert all(ref() is None for ref in refs)
+        index = original(source, asts)
+        refs.append(weakref.ref(index))
+        return index
+
+    monkeypatch.setattr(TokenIndex, "build", classmethod(build))
+    api.format_text(SAMPLE)
+    assert len(refs) == 2
+    assert all(ref() is None for ref in refs)
 
 
 def test_cli_debug_flags(

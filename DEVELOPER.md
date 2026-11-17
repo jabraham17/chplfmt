@@ -85,6 +85,9 @@ for Python type checking.
 - Index rows use packed value buffers and offset pairs. Optional AST locations
   and extra metadata are sparse, and Python token wrappers share the core token
   buffer rather than copying token records.
+- Before verification reparses output, the formatter releases its full input
+  index. A compact view retains AST children/spans, tokens, and normalized token
+  positions; verification still performs every semantic and source check.
 
 ## Validation
 
