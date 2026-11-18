@@ -313,7 +313,9 @@ class _Attacher:
                     self.add(branch, "leading", c)
                     return
             following = None
-        if c.placement is Placement.END_OF_LINE:
+        # Keep a same-line block-comment run attached on the same side.
+        follows_block = i > 0 and self.tokens[i - 1].kind is TokenKind.BLOCK_COMMENT
+        if c.placement is Placement.END_OF_LINE and (c.is_line or not follows_block):
             order = (("trailing", preceding), ("leading", following))
         else:
             order = (("leading", following), ("trailing", preceding))

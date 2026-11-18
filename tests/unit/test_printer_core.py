@@ -186,6 +186,14 @@ def test_function_header_comment_is_emitted_once(separator: str) -> None:
     assert fmt(once, brace_style="break") == once
 
 
+@pytest.mark.parametrize("header", ["if condition then", "if condition", "proc f()"])
+def test_adjacent_header_block_comments_keep_order(header: str) -> None:
+    source = f"{header} /* first */ /* second */ {{ first(); second(); }}\n"
+    once = fmt(source, brace_style="break")
+    assert once.index("/* first */") < once.index("/* second */") < once.index("{")
+    assert fmt(once, brace_style="break") == once
+
+
 @pytest.mark.parametrize(
     "source",
     [
